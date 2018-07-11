@@ -196,7 +196,7 @@ void fft_func_init(void* param)
 	// 计算读取的数据，因为使用simd故个数需要乘以2
 	srow_length = sizeof(FFT_TYPE) * step->circle_max;
 	arow_length = srow_length * 2;
-    total_length = arow_length * row;
+  total_length = arow_length * row;
 	offset = pre_rows * arow_length;
 	athread_get (PE_MODE, (void *)step->input + offset, (void*)&buf_ldm[0], total_length, (void *)&get_reply, 0, 0, 0);
 	asm ("memb");
@@ -228,7 +228,7 @@ void fft_func_proc(void* param)
 	//unsigned int current = *((unsigned int *)(param));
 	unsigned int current;
 	FFT_STEP* step;
-    int total_length;
+  int total_length;
 	int circle_num;
 	int arow_length;
 	int srow_length;
@@ -416,7 +416,25 @@ void recv_row_token()
     threadInfo.token = token;
 
   // in same row
-  if
+  if (threadInfo.logic_id == token)
+  {
+  	// prepare local data.
+    threadInfo.state = RIGHT_RECVCDATA;
+  }
+  else
+  {
+  	if (RET_OK = is_some_array(token))
+  	{
+  		// cal index
+  		// prepare data
+  		// send data
+  	}
+  	else
+  	{
+  		// prepare data
+  		// send data to comm core(0 or 7)
+  	}
+  }
 }
 
 void recv_row_data()
@@ -503,7 +521,7 @@ unsigned short init_threadinfo(int thread_id, THREADINFO *info)
 	
 }
 
-void init_group_map(unsigned short ids, unsigned short cores_in_group)
+void init_group_map(unsigned short gid, unsigned short cores)
 {
   unsigned short map[MAX_RCORE][MAX_CCORE];
 	unsigned short g = 0;
@@ -514,8 +532,8 @@ void init_group_map(unsigned short ids, unsigned short cores_in_group)
 	signed short e1 = MAX_CCORE;
 	signed short b2 = MAX_CCORE - 1;
 	signed short e2 = 0;
-	unsigned short group_id = ids;
-	unsigned short cores_per_group = cores_in_group; //13
+	unsigned short group_id = gid;
+	unsigned short cores_per_group = cores; //13
 	signed short dir = DIR_RIGHT; // right mean i from 0 to 7. left means i form 7 to 0.
 
 	// init table.
@@ -523,7 +541,7 @@ void init_group_map(unsigned short ids, unsigned short cores_in_group)
 	{
 		for (j = 0; j < MAX_CCORE; ++j)
 		{
-			map[i][j] = 0;
+			map[i][j] = 0xFF;
 		}
 	}
 
@@ -538,7 +556,10 @@ void init_group_map(unsigned short ids, unsigned short cores_in_group)
 			{
 				for (j = b1; j < e1; ++j)
 				{
-					map[i][j] = g;
+					//map[i][j] = g;
+					if (g == group_id)
+						map[i][j] = cores_per_group - c;
+						
 					--c;
 
 					if (0 == c)
@@ -562,7 +583,10 @@ void init_group_map(unsigned short ids, unsigned short cores_in_group)
 			{
 				for (j = b2; j >= e2; --j)
 				{
-					map[i][j] = g;
+					//map[i][j] = g;
+					if (g == group_id)
+						map[i][j] = cores_per_group - c;
+						
 					--c;
 
 					if (0 == c)
@@ -590,6 +614,25 @@ void init_group_map(unsigned short ids, unsigned short cores_in_group)
 		++g;
 	}
 
-	return 0;
+	// we get group_id array. then we need allocate logic_id to map
+
+	return;
+}
+
+unsigned int in_some_row(unsigned short logic_id, unsigned char *index)
+{
+	unsigned int i = CORE_ROW(threadInfo.physical_id);
+	unsigned int j = 0;
+
+	if (logic_id == threadInfo.logic_id)
+	  return RET_OK;
+	
+	for (; j < MAX_CCORE; ++j)
+	{
+	  if (logic_id == threadInfo.core_group_map[i][j])
+	    return RET_OK;
+	}
+
+	return RET_ERR;
 }
 
