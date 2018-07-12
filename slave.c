@@ -395,17 +395,101 @@ void start_data_exchange()
 {
   //use threadinfo to 
   threadInfo.token = 0;
-  if (0 == CORE_COL(threadInfo.logic_id + threadInfo.correct_val))
+  threadInfo.current_core = 0;
+  if (IS_BEGIN_CORE(threadInfo.range, threadInfo.logic_id))
   {
-    // copy data
+    threadInfo.recv_token_time = 1;
+    
+    // copy data to out
     LONG_PUTR(threadInfo.token, threadInfo.next_core_index);
 		threadInfo.state = RIGHT_RECVRDATA;
   }
   else
   {
+    threadInfo.recv_token_time = 0;
+    
+    // copy data to temp
     threadInfo.state = RIGHT_RECVRTOKEN;
   }
 }
+
+inline void end_data_exchange()
+{
+}
+
+void recv_row_token()
+{
+  unsigned short token;
+  LONG_GETR(token);
+
+  if (token != threadInfo.token)
+    threadInfo.token = token;
+
+  // the token is current core?
+  if (threadInfo.logic_id != token)
+  {
+  	if (IN_SOME_ROW(threadInfo.range, token))
+  	{
+  		// send temp to token core
+  		send_row_data(buffer, length, token);
+
+  		++threadInfo.current_core;
+  		// prepare next core data to temp
+
+  		// end
+  	}
+  	else
+  	{
+
+  		if (threadInfo.logic_id != threadInfo.rows_comm_core)
+  		{
+  	    // send temp to comm core
+  	    send_row_data(buffer, length, threadInfo.rows_comm_core);
+
+  	    ++threadInfo.current_core;
+  		  // prepare next core data to temp
+
+  		  //end
+  		}
+  		else
+  		{
+  		  // to next row
+  		}
+  	}
+  }
+  else
+  {
+    ++threadInfo.recv_token_time;
+    if (1 == threadInfo.recv_token_time)
+    {
+  	  // copy data to out
+      threadInfo.state = RIGHT_RECVCDATA;
+
+      LONG_PUTC(token, threadInfo.next_core_index);
+    }
+    else if (2 == threadInfo.recv_token_time)
+    {
+      threadInfo.recv_token_time = 0;
+      
+      ++threadInfo.current_core;
+
+      if (threadInfo.current_core < threadInfo.cores_in_group)
+      {
+
+        threadInfo.state = RIGHT_RECVCTOKEN;
+
+        LONG_PUTC(threadInfo.current_core, threadInfo.next_core_index);
+      }
+      else
+      {
+        threadInfo.state = RIGHT_ALLEND;
+        
+        LONG_PUTC(token, threadInfo.next_core_index);
+      }
+    }
+  }
+}
+
 
 void send_row_data(FFT_TYPE* buffer, unsigned short length, unsigned short des)
 {
@@ -466,38 +550,14 @@ void send_column_data(FFT_TYPE* buffer, unsigned short length, unsigned short de
   	
 }
 
-void recv_row_token()
+void recv_row_data(FFT_TYPE* buffer, unsigned short length, unsigned short start_index)
 {
-  unsigned short token;
-  LONG_GETR(token);
+  int i;
 
-  if (token != threadInfo.token)
-    threadInfo.token = token;
-
-  // the token is current core?
-  if (threadInfo.logic_id != token)
+  for (i = 0; i < length; ++i)
   {
-  	if (IN_SOME_ROW(threadInfo.range, token))
-  	{
-  		// cal index
-  		// prepare data
-  		// send data
-  	}
-  	else
-  	{
-  		// prepare data
-  		// send data to comm core(0 or 7)
-  	}
+    LONG_GETR(buffer[start_index]);
   }
-  else
-  {
-  	// prepare local data.
-    threadInfo.state = RIGHT_RECVCDATA;
-  }
-}
-
-void recv_row_data()
-{
 
 }
 
@@ -542,7 +602,7 @@ void do_data_exchange()
 }
 
 // util.c
-unsigned short init_threadinfo(int thread_id, THREADINFO *info)
+unsigned short init_threadinfo(int thread_id)
 {
 	// cal multi-core read N/n
 	int mod = 0;
@@ -551,39 +611,60 @@ unsigned short init_threadinfo(int thread_id, THREADINFO *info)
 	int cores_per_group = 0;
 	int i = 0,j = 0;
 
-	if (NULL == info)
-	  return -1;
+	unsigned char begin,end;
 
-	info->logic_id = thread_id;
+	threadInfo.logic_id = thread_id;
 
 	mod = N % MAX_PCORE_DATA;
 	quo = N / MAX_PCORE_DATA;
 	if (0 == mod)
 	{
 	  cores_per_group = quo;
-	  info->exchange_info.input_buffer_size = N / cores_per_group;
+	  threadInfo.exchange_info.input_buffer_size = N / cores_per_group;
 	}
 	else
 	{
 		cores_per_group = quo + 1;
 		mod1 = N % cores_per_group;
-		if ( 0 == info->logic_id)
-	  	info->exchange_info.input_buffer_size = N / cores_per_group + mod1;
+		if ( 0 == threadInfo.logic_id)
+	  	threadInfo.exchange_info.input_buffer_size = N / cores_per_group + mod1;
 	  else
-	    info->exchange_info.input_buffer_size = N / cores_per_group;
+	    threadInfo.exchange_info.input_buffer_size = N / cores_per_group;
 	}
 
 	// group id
-	info->group_id = thread_id / cores_per_group;
+	threadInfo.physical_id = thread_id;
+	threadInfo.group_id = thread_id / cores_per_group;
+	threadInfo.cores_in_group = cores_per_group;
 
 	// group map
+	init_group_map(threadInfo.group_id, cores_per_group);
+
+	// range
+	init_row_range();
 	
+	// rows_comm_index
 	
+	return RET_OK
 }
 
+/*     after init map like this: when cores_per_group = 5
+
+        slave core array: 0 1 2 3 4 means logic_id
+
+        0 1 2 3 4 0 1 2
+        0 4 3 2 1 0 4 3
+        1 2 3 4 ......
+
+        0 1 2 3 4               group 0
+                     0 1 2
+                        4 3       group 1
+          4 3 2 1 0             group 2
+        0
+        1 2 3 4                  group 3
+*/
 void init_group_map(unsigned short gid, unsigned short cores)
 {
-  unsigned short map[MAX_RCORE][MAX_CCORE];
 	unsigned short g = 0;
 	unsigned short c = 0;
 	signed short i = 0;
@@ -601,7 +682,7 @@ void init_group_map(unsigned short gid, unsigned short cores)
 	{
 		for (j = 0; j < MAX_CCORE; ++j)
 		{
-			map[i][j] = 0xFF;
+			threadInfo.core_group_map[i][j] = 0xFF;
 		}
 	}
 
@@ -618,7 +699,7 @@ void init_group_map(unsigned short gid, unsigned short cores)
 				{
 					//map[i][j] = g;
 					if (g == group_id)
-						map[i][j] = cores_per_group - c;
+						threadInfo.core_group_map[i][j] = cores_per_group - c;
 						
 					--c;
 
@@ -645,7 +726,7 @@ void init_group_map(unsigned short gid, unsigned short cores)
 				{
 					//map[i][j] = g;
 					if (g == group_id)
-						map[i][j] = cores_per_group - c;
+						threadInfo.core_group_map[i][j] = cores_per_group - c;
 						
 					--c;
 
@@ -679,20 +760,85 @@ void init_group_map(unsigned short gid, unsigned short cores)
 	return;
 }
 
-unsigned int in_some_row(unsigned short logic_id, unsigned char *index)
+void init_row_range()
 {
-	unsigned int i = CORE_ROW(threadInfo.physical_id);
-	unsigned int j = 0;
+  	int row_index = 0;
+  	int col_index = 0;
+  	int i = 0;
 
-	if (logic_id == threadInfo.logic_id)
-	  return RET_OK;
+  	unsigned char begin,end;
+  	
+	  row_index = CORE_ROW(threadInfo.physical_id);
+	  col_index = CORE_COL(threadInfo.physical_id);
+	  
+		i = 0;
+		while (i < MAX_CCORE)
+		{
+			if (0xFF != threadInfo.core_group_map[row_index][i])
+			{
+				begin = threadInfo.core_group_map[row_index][i];
+				break;
+			}
 	
-	for (; j < MAX_CCORE; ++j)
-	{
-	  if (logic_id == threadInfo.core_group_map[i][j])
-	    return RET_OK;
-	}
+			++i;
+		}
+	
+		i = MAX_CCORE - 1;
+		while (0 <= i)
+		{
+			if (0xFF != threadInfo.core_group_map[row_index][i])
+			{
+				end = threadInfo.core_group_map[row_index][i];
+				break;
+			}
+	
+			--i;
+		}
 
-	return RET_ERR;
+		// range
+		threadInfo.range = SET_16BITS_PARAM(end, begin);
+
+    // direction
+		if (begin < end)
+		{
+		  threadInfo.direction = DIR_RIGHT;
+		}
+		else if (begin > end)
+		{
+		  threadInfo.direction = DIR_LEFT;
+		}
+		else
+		{
+			threadInfo.direction = ((i == (MAX_CCORE - 1)) ? DIR_LEFT : DIR_RIGHT);
+		}
+
+		// logic_id
+		threadInfo.logic_id = threadInfo.core_group_map[row_index][col_index];
+
+		// next core
+
+    // comm core
+    threadInfo.rows_in_group = 0;
+    threadInfo.rows_comm_core = 0x0FF;
+		for (i = 0; i < MAX_RCORE; ++i)
+		{
+		  if ((0x0FF == threadInfo.core_group_map[i][0]) && (0x0FF == threadInfo.core_group_map[i][MAX_CCORE - 1]))
+		    continue;
+
+      if (0x0FF == threadInfo.rows_comm_core)
+      {
+        if (0x0FF == threadInfo.core_group_map[i][0])
+        {
+          threadInfo.rows_comm_core = threadInfo.core_group_map[i][MAX_CCORE - 1];
+        }
+        else if (0x0FF == threadInfo.core_group_map[i][MAX_CCORE - 1])
+        {
+          threadInfo.rows_comm_core = threadInfo.core_group_map[i][0];
+        }
+      }
+		   
+		   ++threadInfo.rows_in_group;
+		}
 }
+
 

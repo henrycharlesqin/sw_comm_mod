@@ -39,13 +39,21 @@
 #define MOD(n) (n % CORE_NUM)
 #define MM_SHUFFLE(fp3,fp2,fp1,fp0) ((fp3 << 6) | (fp2 << 4) | (fp1 << 2) | fp0)
 
-#define GET_HIGHER_16BITS(data) ((data & 0x0FFFF0000h) >> 16)
-#define GET_LOWER_16BITS(data) ((data & 0x0FFFFh))
-#define GET_HIGHER_8BITS(data) ((data & 0x0FF00h) >> 8)
-#define GET_LOWER_8BITS(data) ((data & 0x0FFh))
+#define GET_HIGHER_16BITS(data) ((data & 0x0FFFF0000) >> 16)
+#define GET_LOWER_16BITS(data) ((data & 0x0FFFF))
+#define GET_HIGHER_8BITS(data) ((data & 0x0FF00) >> 8)
+#define GET_LOWER_8BITS(data) ((data & 0x0FF))
+
+#define SET_16BITS_PARAM(h,l) (h & 0x0FF << 8) | (l & 0x0FF)
+
 #define CORE_ROW(index) (index >> 3)
 #define CORE_COL(index) (index & 0x07)
-#define IN_SOME_ROW(range, current) ((((range & 0x0FF00) >>8) >= current) && ((range & 0x0FF) <= current))
+#define IN_SOME_ROW(range, logic_id) ((((range & 0x0FF00) >>8) >= logic_id) && ((range & 0x0FF) <= logic_id))
+#define IS_BEGIN_CORE(range, logic_id) ((range & 0x0FF) == logic_id)
+#define IS_END_CORE(range, logic_id) (((range & 0x0FF00) >>8) == logic_id)
+#define IS_COMM_CORE(logic_id)
+#define BEGIN_CORE_AROW(range) (range & 0x0FF)
+#define END_CORE_AROW(range) ((range & 0x0FF00) >>8)
 
 /* 寄存器间通信*/
 // 行发送
@@ -159,7 +167,7 @@ typedef struct
 	unsigned short correct_val;     // address correct value for logic_id, when logic_id plus correct_value show the core whether the first or last column core.
 	unsigned short core_rc_index;   // higher 8 bits column index lower 8 bits row index
 	unsigned short next_core_index; // transfer token to next core higher 8 bits column index lower 8 bits row index(only column index  or row index valid, invalid index is 0)
-	unsigned short rows_comm_index; // group contains two rows, this index show through which core to communicate in different rows
+	unsigned short rows_comm_core; // group contains two rows, this index show through which core to communicate in different rows
 	unsigned short current_core;    // Other core send data to current core
 	unsigned short direction;       // show cores communicate direction.
 	unsigned short range;           // show cores logic id from a to b in same row of a group. lower 8 bits begin, higher 8 bits end.
@@ -169,6 +177,7 @@ typedef struct
 	unsigned char current_row;      // row number in group.
 	unsigned short token;
 	unsigned char state;
+	unsigned char recv_token_time;
 	unsigned char core_group_map[MAX_RCORE][MAX_CCORE];  // inform used slave core and gruop is made up with used slaves.	
 	DATAEXCHANGE_INFO exchange_info;
 	
