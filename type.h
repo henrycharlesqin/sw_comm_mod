@@ -45,6 +45,7 @@
 #define GET_LOWER_8BITS(data) ((data & 0x0FFh))
 #define CORE_ROW(index) (index >> 3)
 #define CORE_COL(index) (index & 0x07)
+#define IN_SOME_ROW(range, current) ((((range & 0x0FF00) >>8) >= current) && ((range & 0x0FF) <= current))
 
 /* 寄存器间通信*/
 // 行发送
@@ -161,11 +162,12 @@ typedef struct
 	unsigned short rows_comm_index; // group contains two rows, this index show through which core to communicate in different rows
 	unsigned short current_core;    // Other core send data to current core
 	unsigned short direction;       // show cores communicate direction.
+	unsigned short range;           // show cores logic id from a to b in same row of a group. lower 8 bits begin, higher 8 bits end.
 	unsigned int  recv_data_range;  // high 16 bit start low 16 bit end
 	unsigned char cores_in_group;   // cores in a group
 	unsigned char rows_in_group;    // group contains the number of core rows.
 	unsigned char current_row;      // row number in group.
-	unsigned char token;
+	unsigned short token;
 	unsigned char state;
 	unsigned char core_group_map[MAX_RCORE][MAX_CCORE];  // inform used slave core and gruop is made up with used slaves.	
 	DATAEXCHANGE_INFO exchange_info;

@@ -407,23 +407,77 @@ void start_data_exchange()
   }
 }
 
+void send_row_data(FFT_TYPE* buffer, unsigned short length, unsigned short des)
+{
+  int i;
+	short dis;
+	short col_index;
+	
+	dis = threadInfo.logic_id - des;
+
+
+	if (DIR_RIGHT == threadInfo.direction)
+	{
+		col_index = CORE_COL(threadInfo.physical_id) - dis;
+	}
+	else
+	{
+		col_index = CORE_COL(threadInfo.physical_id) + dis;
+	}	
+
+	for (i = 0; i < length; ++i)
+	{
+		LONG_PUTR(buffer[i], col_index);
+	}
+}
+
+void send_column_data(FFT_TYPE* buffer, unsigned short length, unsigned short des)
+{
+  int i;
+  short dis = 0;
+  short row_index;
+
+	unsigned short begin = GET_LOWER_8BITS(threadInfo.range);
+  unsigned short end  = GET_HIGHER_8BITS(threadInfo.range);
+
+  if (des > end)
+  {
+  	while (end < des)
+  	{
+  		++dis;
+  		end += MAX_CCORE;
+  	}
+  }
+  else if (des < begin)
+  {
+  	while (des < begin)
+  	{
+  	  --dis;
+  	  begin -= MAX_CCORE;
+  	}
+  }
+
+  row_index = CORE_ROW(threadInfo.physical_id) + dis;
+
+  for (i = 0; i < length; ++i)
+  {
+    LONG_PUTC(buffer[i], row_index);
+  }
+  	
+}
+
 void recv_row_token()
 {
-  unsigned char token;
+  unsigned short token;
   LONG_GETR(token);
 
   if (token != threadInfo.token)
     threadInfo.token = token;
 
-  // in same row
-  if (threadInfo.logic_id == token)
+  // the token is current core?
+  if (threadInfo.logic_id != token)
   {
-  	// prepare local data.
-    threadInfo.state = RIGHT_RECVCDATA;
-  }
-  else
-  {
-  	if (RET_OK = is_some_array(token))
+  	if (IN_SOME_ROW(threadInfo.range, token))
   	{
   		// cal index
   		// prepare data
@@ -435,10 +489,16 @@ void recv_row_token()
   		// send data to comm core(0 or 7)
   	}
   }
+  else
+  {
+  	// prepare local data.
+    threadInfo.state = RIGHT_RECVCDATA;
+  }
 }
 
 void recv_row_data()
 {
+
 }
 
 void recv_column_token()
