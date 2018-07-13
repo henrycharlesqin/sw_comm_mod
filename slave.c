@@ -602,52 +602,7 @@ void do_data_exchange()
 }
 
 // util.c
-unsigned short init_threadinfo(int thread_id)
-{
-	// cal multi-core read N/n
-	int mod = 0;
-	int mod1 = 0;
-	int quo = 0;
-	int cores_per_group = 0;
-	int i = 0,j = 0;
-
-	unsigned char begin,end;
-
-	threadInfo.logic_id = thread_id;
-
-	mod = N % MAX_PCORE_DATA;
-	quo = N / MAX_PCORE_DATA;
-	if (0 == mod)
-	{
-	  cores_per_group = quo;
-	  threadInfo.exchange_info.input_buffer_size = N / cores_per_group;
-	}
-	else
-	{
-		cores_per_group = quo + 1;
-		mod1 = N % cores_per_group;
-		if ( 0 == threadInfo.logic_id)
-	  	threadInfo.exchange_info.input_buffer_size = N / cores_per_group + mod1;
-	  else
-	    threadInfo.exchange_info.input_buffer_size = N / cores_per_group;
-	}
-
-	// group id
-	threadInfo.physical_id = thread_id;
-	threadInfo.group_id = thread_id / cores_per_group;
-	threadInfo.cores_in_group = cores_per_group;
-
-	// group map
-	init_group_map(threadInfo.group_id, cores_per_group);
-
-	// range
-	init_row_range();
-	
-	// rows_comm_index
-	
-	return RET_OK
-}
-
+/**********************************************/
 /*     after init map like this: when cores_per_group = 5
 
         slave core array: 0 1 2 3 4 means logic_id
@@ -662,7 +617,7 @@ unsigned short init_threadinfo(int thread_id)
           4 3 2 1 0             group 2
         0
         1 2 3 4                  group 3
-*/
+***********************************************/
 void init_group_map(unsigned short gid, unsigned short cores)
 {
 	unsigned short g = 0;
@@ -765,22 +720,24 @@ void init_row_range()
   	int row_index = 0;
   	int col_index = 0;
   	int i = 0;
+  	int j = 0;
 
   	unsigned char begin,end;
+  	unsigned short dis;
   	
 	  row_index = CORE_ROW(threadInfo.physical_id);
 	  col_index = CORE_COL(threadInfo.physical_id);
 	  
-		i = 0;
-		while (i < MAX_CCORE)
+		j = 0;
+		while (j < MAX_CCORE)
 		{
-			if (0xFF != threadInfo.core_group_map[row_index][i])
+			if (0xFF != threadInfo.core_group_map[row_index][j])
 			{
-				begin = threadInfo.core_group_map[row_index][i];
+				begin = threadInfo.core_group_map[row_index][j];
 				break;
 			}
 	
-			++i;
+			++j;
 		}
 	
 		i = MAX_CCORE - 1;
@@ -798,16 +755,46 @@ void init_row_range()
 		// range
 		threadInfo.range = SET_16BITS_PARAM(end, begin);
 
+		// next core
+		threadInfo.next_core_index = 0x0FF;
+
     // direction
 		if (begin < end)
 		{
 		  threadInfo.direction = DIR_RIGHT;
+
+		  dis = (unsigned short)(end - begin);
+
+      // next core
+		  if (end >= (unsigned char)(threadInfo.logic_id + 1))
+		  {
+		    threadInfo.next_core_index = col_index + 1
+		  }
+		  else
+		  {
+		  	threadInfo.next_core_index = col_index - dis;
+		  }
 		}
 		else if (begin > end)
 		{
 		  threadInfo.direction = DIR_LEFT;
+
+		  // range
+		  threadInfo.range = SET_16BITS_PARAM(begin, end);
+
+		  dis = (unsigned short)(begin - end);
+
+		  // next core
+		  if (begin >= (unsigned char)(threadInfo.logic_id + 1))
+		  {
+		    threadInfo.next_core_index = col_index - 1
+		  }
+		  else
+		  {
+		  	threadInfo.next_core_index = col_index + dis;
+		  }
 		}
-		else
+		else // only one core in group
 		{
 			threadInfo.direction = ((i == (MAX_CCORE - 1)) ? DIR_LEFT : DIR_RIGHT);
 		}
@@ -815,11 +802,10 @@ void init_row_range()
 		// logic_id
 		threadInfo.logic_id = threadInfo.core_group_map[row_index][col_index];
 
-		// next core
-
     // comm core
     threadInfo.rows_in_group = 0;
     threadInfo.rows_comm_core = 0x0FF;
+    threadInfo.current_row = 0xFF;
 		for (i = 0; i < MAX_RCORE; ++i)
 		{
 		  if ((0x0FF == threadInfo.core_group_map[i][0]) && (0x0FF == threadInfo.core_group_map[i][MAX_CCORE - 1]))
@@ -829,16 +815,73 @@ void init_row_range()
       {
         if (0x0FF == threadInfo.core_group_map[i][0])
         {
-          threadInfo.rows_comm_core = threadInfo.core_group_map[i][MAX_CCORE - 1];
+          threadInfo.rows_comm_core = threadInfo.core_group_map[row_index][MAX_CCORE - 1]; // use local row
         }
         else if (0x0FF == threadInfo.core_group_map[i][MAX_CCORE - 1])
         {
-          threadInfo.rows_comm_core = threadInfo.core_group_map[i][0];
+          threadInfo.rows_comm_core = threadInfo.core_group_map[row_index][0]; // use local row
         }
       }
-		   
-		   ++threadInfo.rows_in_group;
+
+      ++threadInfo.rows_in_group;
+
+      if (i == row_index)
+      {
+        threadInfo.current_row = threadInfo.rows_in_group;
+      }
+		}
+
+		if (0x0FF == threadInfo.rows_comm_core)
+		{
+		  threadInfo.rows_comm_core = threadInfo.core_group_map[row_index][MAX_CCORE - 1]; // groups have 8*i cores, used 7 column as default.
 		}
 }
+
+unsigned short init_threadinfo(int thread_id)
+{
+	// cal multi-core read N/n
+	int mod = 0;
+	int mod1 = 0;
+	int quo = 0;
+	int cores_per_group = 0;
+	int i = 0,j = 0;
+
+	unsigned char begin,end;
+
+	threadInfo.logic_id = thread_id;
+
+	mod = N % MAX_PCORE_DATA;
+	quo = N / MAX_PCORE_DATA;
+	if (0 == mod)
+	{
+	  cores_per_group = quo;
+	  threadInfo.exchange_info.input_buffer_size = N / cores_per_group;
+	}
+	else
+	{
+		cores_per_group = quo + 1;
+		mod1 = N % cores_per_group;
+		if ( 0 == threadInfo.logic_id)
+	  	threadInfo.exchange_info.input_buffer_size = N / cores_per_group + mod1;
+	  else
+	    threadInfo.exchange_info.input_buffer_size = N / cores_per_group;
+	}
+
+	// group id
+	threadInfo.physical_id = thread_id;
+	threadInfo.group_id = thread_id / cores_per_group;
+	threadInfo.cores_in_group = cores_per_group;
+
+	// group map
+	init_group_map(threadInfo.group_id, cores_per_group);
+
+	// range
+	init_row_range();
+	
+	// rows_comm_index
+	
+	return RET_OK
+}
+
 
 

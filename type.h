@@ -54,6 +54,7 @@
 #define IS_COMM_CORE(logic_id)
 #define BEGIN_CORE_AROW(range) (range & 0x0FF)
 #define END_CORE_AROW(range) ((range & 0x0FF00) >>8)
+#define GET_ROW_CORES(range) ((range & 0x0FF00) >>8) - (range & 0x0FF))
 
 /* 寄存器间通信*/
 // 行发送
