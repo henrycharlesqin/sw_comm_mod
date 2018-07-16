@@ -386,9 +386,44 @@ void call_fft_func(int type, int id)
 
 	return;
 }
+
+void data_prepare(dataexchange_info_t* info, fft_param_t1* param)
+{
+  unsigned short i0;
+  unsigned short i1; 
+  unsigned short bufstride = param->bufstride;
+  unsigned short is = param->is;
+  unsigned short ivs = param->ivs;
+
+  FFT_TYPE *recv = info.recv_buffer;
+  FFT_TYPE *input = info.input_buffer;
+
+	if (threadInfo.logic_id == threadInfo.token)
+	{
+	  // copy data from input buffer to recv_buffer
+	  for (i1 = 0; i1 < param->v1; ++i1)
+	  {
+	    for (i0 = 0; i0 < param->n; ++i0)
+	    {
+	      unsigned short index = i0 * is + i1 * ivs;
+	    	if (IN_RECV_RANGE(threadInfo.recv_data_range ,index))
+	    	{
+	        recv[i0 * bufstride + i1 * 1].re = input[i0 * is + i1 * ivs].re; // bufstride 44(40)  is 50(25) ivs 1000(500)
+	        recv[i0 * bufstride + i1 * 1].im = input[i0 * is + i1 * ivs].im;
+	        ++info.buffer_index;
+	      }
+	    }
+	  }
+	}
+	else
+	{
+	  // copy data from input buffer to tmp buffer
+	}
+}
+
 void init_data_exchange()
 {
-
+    threadInfo.exchange_info.buffer_index = 0;
 }
 
 void start_data_exchange()
@@ -602,8 +637,10 @@ void do_data_exchange()
 }
 
 // util.c
-/**********************************************/
-/*     after init map like this: when cores_per_group = 5
+/*********************************************************/
+/*     after init map like this: when cores_per_group = 5 means
+a group contains 5 slave cores. this function will allocate logic_id to
+current group's slave core.
 
         slave core array: 0 1 2 3 4 means logic_id
 
@@ -617,8 +654,11 @@ void do_data_exchange()
           4 3 2 1 0             group 2
         0
         1 2 3 4                  group 3
-***********************************************/
-void init_group_map(unsigned short gid, unsigned short cores)
+
+        but the function only show current group's slave core's logic_id.
+the others is 0x0FF;
+**********************************************************/
+static void init_group_map(unsigned short gid, unsigned short cores)
 {
 	unsigned short g = 0;
 	unsigned short c = 0;
@@ -715,7 +755,7 @@ void init_group_map(unsigned short gid, unsigned short cores)
 	return;
 }
 
-void init_row_range()
+static void init_row_range()
 {
   	int row_index = 0;
   	int col_index = 0;
@@ -805,7 +845,7 @@ void init_row_range()
     // comm core
     threadInfo.rows_in_group = 0;
     threadInfo.rows_comm_core = 0x0FF;
-    threadInfo.current_row = 0xFF;
+    threadInfo.current_row = 0x0FF;
 		for (i = 0; i < MAX_RCORE; ++i)
 		{
 		  if ((0x0FF == threadInfo.core_group_map[i][0]) && (0x0FF == threadInfo.core_group_map[i][MAX_CCORE - 1]))
@@ -845,6 +885,8 @@ unsigned short init_threadinfo(int thread_id)
 	int quo = 0;
 	int cores_per_group = 0;
 	int i = 0,j = 0;
+	unsigned short start_recvdata_index = 0;
+	unsigned short end_recvdata_index = 0;
 
 	unsigned char begin,end;
 
@@ -855,12 +897,14 @@ unsigned short init_threadinfo(int thread_id)
 	if (0 == mod)
 	{
 	  cores_per_group = quo;
+	  threadInfo.recv_data_rem = 0;
 	  threadInfo.exchange_info.input_buffer_size = N / cores_per_group;
 	}
 	else
 	{
 		cores_per_group = quo + 1;
 		mod1 = N % cores_per_group;
+		threadInfo.recv_data_rem = mod1;
 		if ( 0 == threadInfo.logic_id)
 	  	threadInfo.exchange_info.input_buffer_size = N / cores_per_group + mod1;
 	  else
@@ -879,6 +923,21 @@ unsigned short init_threadinfo(int thread_id)
 	init_row_range();
 	
 	// rows_comm_index
+
+	// recv_data_range
+	j = threadInfo.logic_id;
+	if (0  == j)
+	{
+	  start_recvdata_index = 0;
+	  end_recvdata_index = threadInfo.exchange_info.input_buffer_size - 1;
+	}
+	else
+	{
+	  start_recvdata_index = j * threadInfo.exchange_info.input_buffer_size + mod1;
+	  end_recvdata_index = (j + 1) * threadInfo.exchange_info.input_buffer_size + mod1 - 1;
+	}
+
+	threadInfo.recv_data_range = SET_32BITS_PARAM(start_recvdata_index, end_recvdata_index);
 	
 	return RET_OK
 }

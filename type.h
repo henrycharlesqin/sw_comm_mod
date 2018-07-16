@@ -44,7 +44,8 @@
 #define GET_HIGHER_8BITS(data) ((data & 0x0FF00) >> 8)
 #define GET_LOWER_8BITS(data) ((data & 0x0FF))
 
-#define SET_16BITS_PARAM(h,l) (h & 0x0FF << 8) | (l & 0x0FF)
+#define SET_16BITS_PARAM(h,l) ((h & 0x0FF << 8) | (l & 0x0FF))
+#define SET_32BITS_PARAM(h,l) ((h & 0x0FFFF << 16) | (l & 0x0FFFF))
 
 #define CORE_ROW(index) (index >> 3)
 #define CORE_COL(index) (index & 0x07)
@@ -55,6 +56,8 @@
 #define BEGIN_CORE_AROW(range) (range & 0x0FF)
 #define END_CORE_AROW(range) ((range & 0x0FF00) >>8)
 #define GET_ROW_CORES(range) ((range & 0x0FF00) >>8) - (range & 0x0FF))
+
+#define IN_RECV_RANGE(recv_data_range ,index) ((((recv_data_range & 0x0FFFF0000) >> 16) <= index) && (index <= (recv_data_range & 0x0FFFF)))
 
 /* 寄存器间通信*/
 // 行发送
@@ -136,10 +139,15 @@ typedef fft_func_t FFT_FUNC;
 
 typedef struct
 {
-  unsigned short n;      // N dot FFT
+  unsigned short n;                // N dot FFT
   unsigned short ovs;    
   unsigned short ivs;
+  unsigned short v1;
+  unsigned short is;
+  unsigned short bufstride;
 } fft_param_t1;
+
+typedef fft_param_t1 FFT_MSG_PARAM;
 
 typedef struct
 {
@@ -150,9 +158,14 @@ typedef struct
   unsigned short recv_total_len;     // recv total
   unsigned short input_buffer_size;  // recv data len
   FFT_TYPE *input_buffer;            // dma read origin data
-  FFT_TYPE *srecv_buffer;            // recv buffer start address
-  FFT_TYPE *crecv_buffer;            // recv buffer current address
+  FFT_TYPE *recv_buffer;             // recv buffer start address
+  FFT_TYPE *current_recv_buffer;     // recv buffer current address
+  FFT_TYPE *tmp_buffer;              // temp buffer address
 }dataexchange_info_t;
+
+typedef void (*data_prepare_ptr)(dataexchange_info_t*, fft_param_t1*);
+typedef void (*data_send_ptr)(dataexchange_info_t*, fft_param_t1*);
+typedef void (*data_recv_ptr)(dataexchange_info_t*, fft_param_t1*);
 
 typedef dataexchange_info_t DATAEXCHANGE_INFO;
 
@@ -168,10 +181,11 @@ typedef struct
 	unsigned short correct_val;     // address correct value for logic_id, when logic_id plus correct_value show the core whether the first or last column core.
 	unsigned short core_rc_index;   // higher 8 bits column index lower 8 bits row index
 	unsigned short next_core_index; // transfer token to next core higher 8 bits column index lower 8 bits row index(only column index  or row index valid, invalid index is 0)
-	unsigned short rows_comm_core; // group contains two rows, this index show through which core to communicate in different rows
+	unsigned short rows_comm_core;  // group contains two rows, this core show through which core to communicate in different rows
 	unsigned short current_core;    // Other core send data to current core
 	unsigned short direction;       // show cores communicate direction.
 	unsigned short range;           // show cores logic id from a to b in same row of a group. lower 8 bits begin, higher 8 bits end.
+	unsigned int  recv_data_rem;    // recieve data remainder
 	unsigned int  recv_data_range;  // high 16 bit start low 16 bit end
 	unsigned char cores_in_group;   // cores in a group
 	unsigned char rows_in_group;    // group contains the number of core rows.
@@ -179,8 +193,8 @@ typedef struct
 	unsigned short token;
 	unsigned char state;
 	unsigned char recv_token_time;
-	unsigned char core_group_map[MAX_RCORE][MAX_CCORE];  // inform used slave core and gruop is made up with used slaves.	
-	DATAEXCHANGE_INFO exchange_info;
+	unsigned char core_group_map[MAX_RCORE][MAX_CCORE];  // current group is including which slave cores .	If not included , value is 0x0FF, otherwise value is logic_id.
+	dataexchange_info_t exchange_info;
 	
 }threadinfo_t;
 
