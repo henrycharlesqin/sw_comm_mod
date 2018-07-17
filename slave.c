@@ -12,6 +12,8 @@ __thread_local FFT_TYPE w_ldm[KNUM] __attribute__((__aligned__(128)));
 
 __thread_local FFT_PARAM slaveParam;
 __thread_local THREADINFO threadInfo;
+__thread_local DATAEXCHANGE_INFO* dataInfo;
+__thread_local FFT_PARAM fft_param;
 __thread_local volatile unsigned long get_reply, put_reply;
 __thread_local int thread_id = 0;
 __thread_local unsigned int pre_rows = 0; // 记录本核之前其他核所读取的行数之和
@@ -394,36 +396,69 @@ void data_prepare(dataexchange_info_t* info, fft_param_t1* param)
   unsigned short bufstride = param->bufstride;
   unsigned short is = param->is;
   unsigned short ivs = param->ivs;
+  unsigned short index = 0;
 
-  FFT_TYPE *recv = info.recv_buffer;
-  FFT_TYPE *input = info.input_buffer;
+  FFT_TYPE *input = info.input_buffer + threadInfo.current_core * 1; // TODO: pay attension to shift value 1.
 
 	if (threadInfo.logic_id == threadInfo.token)
 	{
 	  // copy data from input buffer to recv_buffer
+	  FFT_TYPE *recv = info.recv_buffer;
+	  
 	  for (i1 = 0; i1 < param->v1; ++i1)
 	  {
 	    for (i0 = 0; i0 < param->n; ++i0)
 	    {
-	      unsigned short index = i0 * is + i1 * ivs;
+	      index = i0 * is + i1 * ivs;
 	    	if (IN_RECV_RANGE(threadInfo.recv_data_range ,index))
 	    	{
-	        recv[i0 * bufstride + i1 * 1].re = input[i0 * is + i1 * ivs].re; // bufstride 44(40)  is 50(25) ivs 1000(500)
-	        recv[i0 * bufstride + i1 * 1].im = input[i0 * is + i1 * ivs].im;
-	        ++info.buffer_index;
+	    	  // i0 * bufstride + i1 * 1
+	        recv[i0 * bufstride + i1 * 1].re = input[index].re; // bufstride 44(20)  is 50(25) ivs 1000(500)
+	        recv[i0 * bufstride + i1 * 1].im = input[index].im;
+	        ++info.recv_data_len;
 	      }
+	      else if (OUT_RECV_RANGE(threadInfo.recv_data_range ,index))
+	      {
+	      	break;
+	      }
+
+	      ++info.recv_data_index;
 	    }
 	  }
 	}
 	else
 	{
 	  // copy data from input buffer to tmp buffer
+	  FFT_TYPE *recv = info.tmp_buffer;
+	  
+	  for (i1 = 0; i1 < param->v1; ++i1)
+	  {
+	    for (i0 = 0; i0 < param->n; ++i0)
+	    {
+	      index = i0 * is + i1 * ivs;
+	    	if (IN_RECV_RANGE(threadInfo.recv_data_range ,index))
+	    	{
+	    	  // i0 * bufstride + i1 * 1
+	        recv[info.tmp_data_index].re = input[index].re; // bufstride 44(20)  is 50(25) ivs 1000(500)
+	        recv[info.tmp_data_index].im = input[index].im;
+	        ++info.tmp_data_index;
+	      }
+	      else if (OUT_RECV_RANGE(threadInfo.recv_data_range ,index))
+	      {
+	      	break;
+	      }
+	    }
+	  }
 	}
 }
 
 void init_data_exchange()
 {
-    threadInfo.exchange_info.buffer_index = 0;
+    threadInfo.exchange_info.recv_data_index = 0;
+    threadInfo.exchange_info.tmp_data_index = 0;
+
+    // cal mode bat or single
+    dataInfo = &threadInfo.exchange_info;
 }
 
 void start_data_exchange()
@@ -436,20 +471,36 @@ void start_data_exchange()
     threadInfo.recv_token_time = 1;
     
     // copy data to out
-    LONG_PUTR(threadInfo.token, threadInfo.next_core_index);
-		threadInfo.state = RIGHT_RECVRDATA;
+    data_prepare(dataInfo, &fft_param);
+
+    if (!IS_SINGLE_CORE(threadInfo.next_core_index))
+    {
+      LONG_PUTR(threadInfo.token, threadInfo.next_core_index);
+		  threadInfo.state = RIGHT_RECVRDATA;
+		}
+		else
+		{
+		  LONG_PUTC(threadInfo.token, threadInfo.next_row_index);
+		  threadInfo.state = RIGHT_RECVCDATA;
+		}
   }
   else
   {
     threadInfo.recv_token_time = 0;
     
     // copy data to temp
-    threadInfo.state = RIGHT_RECVRTOKEN;
+    data_prepare(dataInfo, &fft_param);
+
+    if (!IS_SINGLE_CORE(threadInfo.next_core_index))
+      threadInfo.state = RIGHT_RECVRTOKEN;
+    else
+      threadInfo.state = RIGHT_RECVCTOKEN;
   }
 }
 
 inline void end_data_exchange()
 {
+  threadInfo.token = 0;
 }
 
 void recv_row_token()
@@ -466,29 +517,37 @@ void recv_row_token()
   	if (IN_SOME_ROW(threadInfo.range, token))
   	{
   		// send temp to token core
-  		send_row_data(buffer, length, token);
+  		send_row_data(dataInfo->tmp_buffer, dataInfo->tmp_data_index, token);
 
   		++threadInfo.current_core;
+  		
   		// prepare next core data to temp
+  		data_prepare(dataInfo, &fft_param);
 
   		// end
   	}
-  	else
+  	else // not in the same row
   	{
-
   		if (threadInfo.logic_id != threadInfo.rows_comm_core)
   		{
   	    // send temp to comm core
-  	    send_row_data(buffer, length, threadInfo.rows_comm_core);
+  	    send_row_data(dataInfo->tmp_buffer, dataInfo->tmp_data_index, threadInfo.rows_comm_core);
 
   	    ++threadInfo.current_core;
+  	    
   		  // prepare next core data to temp
-
+  		  data_prepare(dataInfo, &fft_param);
   		  //end
   		}
   		else
   		{
   		  // to next row
+  		  
+  		  //send_row_data(dataInfo->tmp_buffer, dataInfo->tmp_data_index, threadInfo.rows_comm_core);
+
+  		  //++threadInfo.current_core;
+
+  		  //data_prepare(dataInfo, &fft_param);
   		}
   	}
   }
@@ -585,15 +644,39 @@ void send_column_data(FFT_TYPE* buffer, unsigned short length, unsigned short de
   	
 }
 
-void recv_row_data(FFT_TYPE* buffer, unsigned short length, unsigned short start_index)
+void recv_row_data()
 {
   int i;
+  int length;
+  int index;
 
-  for (i = 0; i < length; ++i)
+  // 判断是否为行将通信的core，如果是，通信长度为本行所有数据长
+  // 如果不是等待接收网络中所有数据
+  if (threadInfo.logic_id != threadInfo.rows_comm_core)
   {
-    LONG_GETR(buffer[start_index]);
+  	length = (GET_ROW_CORES(threadInfo.range) + 1) * 80;
+  }
+  else
+  {
+  	length = threadInfo.cores_in_group * 80;
   }
 
+  index = dataInfo->recv_data_index;
+  
+  for (i = 0; i < length; ++i)
+  {
+    if (dataInfo->recv_buffer_size <= index)
+    {
+      index = 0;
+    }
+    
+    LONG_GETR(dataInfo.recv_buffer[index]);
+
+    ++index;
+    // 注意循环
+  }
+
+  dataInfo->recv_data_index = index;
 }
 
 void recv_column_token()
@@ -798,6 +881,9 @@ static void init_row_range()
 		// next core
 		threadInfo.next_core_index = 0x0FF;
 
+		// next row index
+		threadInfo.next_row_index = 0x0FF;
+
     // direction
 		if (begin < end)
 		{
@@ -837,6 +923,7 @@ static void init_row_range()
 		else // only one core in group
 		{
 			threadInfo.direction = ((i == (MAX_CCORE - 1)) ? DIR_LEFT : DIR_RIGHT);
+			// next_core_index 0x0FF
 		}
 
 		// logic_id
@@ -874,6 +961,27 @@ static void init_row_range()
 		if (0x0FF == threadInfo.rows_comm_core)
 		{
 		  threadInfo.rows_comm_core = threadInfo.core_group_map[row_index][MAX_CCORE - 1]; // groups have 8*i cores, used 7 column as default.
+		}
+
+		if (threadInfo.logic_id == threadInfo.rows_comm_core)
+		{
+			row_index = CORE_ROW(threadInfo.physical_id);
+	    col_index
+	    if ((row_index + 1) < MAX_RCORE)
+	    {
+	      if (0x0FF != threadInfo.core_group_map[row_index + 1][col_index])
+	      {
+	        threadInfo.next_row_index = row_index + 1;
+	      }
+	      else
+	      {
+	      	threadInfo.next_row_index = row_index - (threadInfo.rows_in_group - 1);
+	      }
+	    }
+	    else
+	    {
+	      threadInfo.next_row_index = row_index - (threadInfo.rows_in_group - 1);
+	    }
 		}
 }
 

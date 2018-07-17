@@ -52,12 +52,13 @@
 #define IN_SOME_ROW(range, logic_id) ((((range & 0x0FF00) >>8) >= logic_id) && ((range & 0x0FF) <= logic_id))
 #define IS_BEGIN_CORE(range, logic_id) ((range & 0x0FF) == logic_id)
 #define IS_END_CORE(range, logic_id) (((range & 0x0FF00) >>8) == logic_id)
-#define IS_COMM_CORE(logic_id)
+#define IS_SINGLE_CORE(next_core_index) (next_core_index == 0x0FF)
 #define BEGIN_CORE_AROW(range) (range & 0x0FF)
 #define END_CORE_AROW(range) ((range & 0x0FF00) >>8)
 #define GET_ROW_CORES(range) ((range & 0x0FF00) >>8) - (range & 0x0FF))
 
-#define IN_RECV_RANGE(recv_data_range ,index) ((((recv_data_range & 0x0FFFF0000) >> 16) <= index) && (index <= (recv_data_range & 0x0FFFF)))
+#define IN_RECV_RANGE(recv_data_range, index) ((((recv_data_range & 0x0FFFF0000) >> 16) <= index) && (index <= (recv_data_range & 0x0FFFF)))
+#define OUT_RECV_RANGE(recv_data_range, index) (index > (recv_data_range & 0x0FFFF))
 
 /* 寄存器间通信*/
 // 行发送
@@ -151,13 +152,16 @@ typedef fft_param_t1 FFT_MSG_PARAM;
 
 typedef struct
 {
-  unsigned short buffer_index;       // recv temp buffer index
-  unsigned short buffer_size;        // recv temp buffer size
+  unsigned short recv_data_index;    // recv buffer index
+  unsigned short recv_buffer_size;   // recv buffer size
   unsigned short recv_data_len;      // recv data length per core
   unsigned short recv_data_span;     // recv data interval
   unsigned short recv_total_len;     // recv total
   unsigned short input_buffer_size;  // recv data len
+  unsigned short tmp_data_index;     // temp buffer index
+  unsigned short tmp_buffer_size;    // temp buffer size
   FFT_TYPE *input_buffer;            // dma read origin data
+  FFT_TYPE *current_input_buffer;    // input buffer current address
   FFT_TYPE *recv_buffer;             // recv buffer start address
   FFT_TYPE *current_recv_buffer;     // recv buffer current address
   FFT_TYPE *tmp_buffer;              // temp buffer address
@@ -181,16 +185,17 @@ typedef struct
 	unsigned short correct_val;     // address correct value for logic_id, when logic_id plus correct_value show the core whether the first or last column core.
 	unsigned short core_rc_index;   // higher 8 bits column index lower 8 bits row index
 	unsigned short next_core_index; // transfer token to next core higher 8 bits column index lower 8 bits row index(only column index  or row index valid, invalid index is 0)
+	unsigned short next_row_index;
 	unsigned short rows_comm_core;  // group contains two rows, this core show through which core to communicate in different rows
 	unsigned short current_core;    // Other core send data to current core
 	unsigned short direction;       // show cores communicate direction.
 	unsigned short range;           // show cores logic id from a to b in same row of a group. lower 8 bits begin, higher 8 bits end.
+	unsigned short token;
 	unsigned int  recv_data_rem;    // recieve data remainder
 	unsigned int  recv_data_range;  // high 16 bit start low 16 bit end
 	unsigned char cores_in_group;   // cores in a group
 	unsigned char rows_in_group;    // group contains the number of core rows.
 	unsigned char current_row;      // row number in group.
-	unsigned short token;
 	unsigned char state;
 	unsigned char recv_token_time;
 	unsigned char core_group_map[MAX_RCORE][MAX_CCORE];  // current group is including which slave cores .	If not included , value is 0x0FF, otherwise value is logic_id.
