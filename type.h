@@ -87,7 +87,23 @@ asm volatile ("getc %0\n":"=r"(var)::"memory")
 #define RIGHT_RECVRDATA 2
 #define RIGHT_RECVCTOKEN 3
 #define RIGHT_RECVCDATA 4
-#define RIGHT_ALLEND 5
+#define SUBRIGHT_NORMAL_RECVRTOKEN 5
+#define SUBRIGHT_CURRENT_RECVRTOKEN 6
+#define SUBRIGHT_NORMAL_RECVRDATA 7 // no use
+#define SUBRIGHT_CURRENT_RECVRDATA 8
+#define SUBRIGHT_COMM_RECVCDATA 9
+#define SUBRIGHT_CURRENT_RECVCDATA 10
+#define SUBRIGHT_SINGLE_RECVCDATA 11
+#define SUBRIGHT_COMM_RECVCTOKEN 12
+#define SUBRIGHT_CURRENT_RECVCTOKEN 13
+#define SUBRIGHT_SINGLE_RECVCTOKEN 14
+
+
+#define CORE_STATE_CN  1 // current and normal core
+#define CORE_STATE_CC  2 // current comm core
+#define CORE_STATE_CNC 3 // current normal comm core
+
+#define RIGHT_ALLEND 100
 
 typedef struct{
 	float re;
@@ -150,6 +166,19 @@ typedef struct
 
 typedef fft_param_t1 FFT_MSG_PARAM;
 
+typedef void (*recv_row_token_func)();
+typedef void (*recv_row_data_func)();
+typedef void (*recv_col_token_func)();
+typedef void (*recv_col_data_func)();
+
+typedef struct
+{
+	recv_row_token_func recv_rtoken_func;
+	recv_row_data_func recv_rdata_func;
+	recv_col_token_func recv_ctoken_func;
+	recv_col_data_func recv_cdata_func;
+}dataexchange_func_t;
+
 typedef struct
 {
   unsigned short recv_data_index;    // recv buffer index
@@ -184,7 +213,7 @@ typedef struct
 	unsigned short physical_id;		  // thread_id
 	unsigned short correct_val;     // address correct value for logic_id, when logic_id plus correct_value show the core whether the first or last column core.
 	unsigned short core_rc_index;   // higher 8 bits column index lower 8 bits row index
-	unsigned short next_core_index; // transfer token to next core higher 8 bits column index lower 8 bits row index(only column index  or row index valid, invalid index is 0)
+	unsigned short next_col_index;  // transfer token to next core higher 8 bits column index lower 8 bits row index(only column index  or row index valid, invalid index is 0)
 	unsigned short next_row_index;
 	unsigned short rows_comm_core;  // group contains two rows, this core show through which core to communicate in different rows
 	unsigned short current_core;    // Other core send data to current core

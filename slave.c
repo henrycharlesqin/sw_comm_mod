@@ -473,9 +473,9 @@ void start_data_exchange()
     // copy data to out
     data_prepare(dataInfo, &fft_param);
 
-    if (!IS_SINGLE_CORE(threadInfo.next_core_index))
+    if (!IS_SINGLE_CORE(threadInfo.next_col_index))
     {
-      LONG_PUTR(threadInfo.token, threadInfo.next_core_index);
+      LONG_PUTR(threadInfo.token, threadInfo.next_col_index);
 		  threadInfo.state = RIGHT_RECVRDATA;
 		}
 		else
@@ -491,7 +491,7 @@ void start_data_exchange()
     // copy data to temp
     data_prepare(dataInfo, &fft_param);
 
-    if (!IS_SINGLE_CORE(threadInfo.next_core_index))
+    if (!IS_SINGLE_CORE(threadInfo.next_col_index))
       threadInfo.state = RIGHT_RECVRTOKEN;
     else
       threadInfo.state = RIGHT_RECVCTOKEN;
@@ -503,87 +503,106 @@ inline void end_data_exchange()
   threadInfo.token = 0;
 }
 
-void recv_row_token()
+// normal core recv row token
+void normal_recv_row_token()
 {
-  unsigned short token;
+	unsigned short token;
   LONG_GETR(token);
+	
+	if (token != threadInfo.token)
+		threadInfo.token = token;
 
-  if (token != threadInfo.token)
-    threadInfo.token = token;
-
-  // the token is current core?
-  if (threadInfo.logic_id != token)
+	if (IN_SOME_ROW(threadInfo.range, token))
   {
-  	if (IN_SOME_ROW(threadInfo.range, token))
+  	// send temp to token core
+  	send_row_data(dataInfo->tmp_buffer, dataInfo->tmp_data_index, token);
+
+  	if (threadInfo.logic_id == threadInfo.rows_comm_core)
   	{
-  		// send temp to token core
-  		send_row_data(dataInfo->tmp_buffer, dataInfo->tmp_data_index, token);
-
-  		++threadInfo.current_core;
-  		
-  		// prepare next core data to temp
-  		data_prepare(dataInfo, &fft_param);
-
-  		// end
-  	}
-  	else // not in the same row
-  	{
-  		if (threadInfo.logic_id != threadInfo.rows_comm_core)
-  		{
-  	    // send temp to comm core
-  	    send_row_data(dataInfo->tmp_buffer, dataInfo->tmp_data_index, threadInfo.rows_comm_core);
-
-  	    ++threadInfo.current_core;
-  	    
-  		  // prepare next core data to temp
-  		  data_prepare(dataInfo, &fft_param);
-  		  //end
-  		}
-  		else
-  		{
-  		  // to next row
-  		  
-  		  //send_row_data(dataInfo->tmp_buffer, dataInfo->tmp_data_index, threadInfo.rows_comm_core);
-
-  		  //++threadInfo.current_core;
-
-  		  //data_prepare(dataInfo, &fft_param);
-  		}
+      LONG_PUTC(token, threadInfo.next_row_index);
+      threadInfo.state = SUBRIGHT_COMM_RECVCDATA;
+  		return;
   	}
   }
-  else
+  else // not in the same row
   {
-    ++threadInfo.recv_token_time;
-    if (1 == threadInfo.recv_token_time)
-    {
-  	  // copy data to out
-      threadInfo.state = RIGHT_RECVCDATA;
+  	if (threadInfo.logic_id != threadInfo.rows_comm_core)
+  	{
+  	   // send temp to comm core
+  	   send_row_data(dataInfo->tmp_buffer, dataInfo->tmp_data_index, threadInfo.rows_comm_core);
+  	}
+  	else
+  	{
+  	   threadInfo.state = SUBRIGHT_COMM_RECVCTOKEN;
+  		 return; 
+  		 // to next row
+  		  
+  		 //send_row_data(dataInfo->tmp_buffer, dataInfo->tmp_data_index, threadInfo.rows_comm_core);
 
-      LONG_PUTC(token, threadInfo.next_core_index);
-    }
-    else if (2 == threadInfo.recv_token_time)
-    {
-      threadInfo.recv_token_time = 0;
+  		 //++threadInfo.current_core;
+
+  		 //data_prepare(dataInfo, &fft_param);
+  	}
+  }
+
+  ++threadInfo.current_core;
+
+  // TODO:end 
+  		
+  // prepare next core data to temp
+  data_prepare(dataInfo, &fft_param);
+
+  // send token to next
+  LONG_PUTR(token, threadInfo.next_col_index);
+
+  // end
+}
+
+// current core recv row token (token == logic_id)
+void current_recv_row_token()
+{
+	unsigned short token;
+  LONG_GETR(token);
+
+  ++threadInfo.recv_token_time;
+  if (1 == threadInfo.recv_token_time)
+  {
+  	// copy data to out
+    threadInfo.state = SUBRIGHT_CURRENT_RECVRDATA;
+
+    LONG_PUTC(token, threadInfo.next_col_index);
+  }
+  else if (2 == threadInfo.recv_token_time)
+  {
+    threadInfo.recv_token_time = 0;
+
+    if (threadInfo.logic_id == threadInfo.rows_comm_core)
+  	{
+      LONG_PUTC(token, threadInfo.next_row_index);
+      threadInfo.state = SUBRIGHT_COMM_RECVCDATA;
+  		return;
+  	}
       
-      ++threadInfo.current_core;
+    ++threadInfo.current_core;
 
-      if (threadInfo.current_core < threadInfo.cores_in_group)
-      {
+    if (threadInfo.current_core < threadInfo.cores_in_group)
+    {
+      threadInfo.state = SUBRIGHT_NORMAL_RECVRTOKEN;
 
-        threadInfo.state = RIGHT_RECVCTOKEN;
-
-        LONG_PUTC(threadInfo.current_core, threadInfo.next_core_index);
-      }
-      else
-      {
-        threadInfo.state = RIGHT_ALLEND;
+      LONG_PUTC(threadInfo.current_core, threadInfo.next_col_index);
+    }
+    else
+    {
+      threadInfo.state = RIGHT_ALLEND;
         
-        LONG_PUTC(token, threadInfo.next_core_index);
-      }
+      //LONG_PUTC(token, threadInfo.next_col_index);  last recv token.
     }
   }
 }
 
+void recv_row_token()
+{
+}
 
 void send_row_data(FFT_TYPE* buffer, unsigned short length, unsigned short des)
 {
@@ -879,7 +898,7 @@ static void init_row_range()
 		threadInfo.range = SET_16BITS_PARAM(end, begin);
 
 		// next core
-		threadInfo.next_core_index = 0x0FF;
+		threadInfo.next_col_index = 0x0FF;
 
 		// next row index
 		threadInfo.next_row_index = 0x0FF;
@@ -894,11 +913,11 @@ static void init_row_range()
       // next core
 		  if (end >= (unsigned char)(threadInfo.logic_id + 1))
 		  {
-		    threadInfo.next_core_index = col_index + 1
+		    threadInfo.next_col_index = col_index + 1
 		  }
 		  else
 		  {
-		  	threadInfo.next_core_index = col_index - dis;
+		  	threadInfo.next_col_index = col_index - dis;
 		  }
 		}
 		else if (begin > end)
@@ -913,11 +932,11 @@ static void init_row_range()
 		  // next core
 		  if (begin >= (unsigned char)(threadInfo.logic_id + 1))
 		  {
-		    threadInfo.next_core_index = col_index - 1
+		    threadInfo.next_col_index = col_index - 1
 		  }
 		  else
 		  {
-		  	threadInfo.next_core_index = col_index + dis;
+		  	threadInfo.next_col_index = col_index + dis;
 		  }
 		}
 		else // only one core in group
