@@ -5,98 +5,9 @@
 
 extern __thread_local FFT_PARAM slaveParam;
 extern __thread_local THREADINFO threadInfo;
-extern __thread_local DATAEXCHANGE_INFO* dataInfo;
+extern __thread_local DATAEXCHANGE_INFO dataInfo;
 extern __thread_local FFT_PARAM fft_param;
 extern __thread_local int thread_id = 0;
-
-// normal core
-void n_recv_row_token()
-{
-  unsigned short token;
-  LONG_GETR(token);
-	
-	if (token != threadInfo.token)
-		threadInfo.token = token;
-
-	// TODO change state
-
-	if (IN_SOME_ROW(threadInfo.range, token))
-  {
-  	// send temp to token core
-  	send_row_data(dataInfo->tmp_buffer, dataInfo->tmp_data_index, token);
-  }
-  else // not in the same row
-  {
-  	// send temp to comm core
-  	send_row_data(dataInfo->tmp_buffer, dataInfo->tmp_data_index, threadInfo.rows_comm_core);
-  }
-
-  ++threadInfo.current_core;
-
-  if (threadInfo.current_core < threadInfo.cores_in_group)
-  {
-    // prepare next core data to temp
-    data_prepare(dataInfo, &fft_param);
-  }
-  else
-  {
-    threadInfo.state = RIGHT_ALLEND;    
-  }
-  
-  // send token to next
-  LONG_PUTR(token, threadInfo.next_col_index);
-}
-
-
-// current core
-void cu_recv_row_token()
-{
-  unsigned short token;
-  LONG_GETR(token);
-	
-	if (token != threadInfo.token)
-		threadInfo.token = token;
-
-	++threadInfo.current_core;
-
-  if (threadInfo.current_core < threadInfo.cores_in_group)
-  {
-    // prepare next core data to temp
-    data_prepare(dataInfo, &fft_param);
-    
-    threadInfo.state = RIGHT_RECVRTOKEN;
-
-    LONG_PUTC(threadInfo.current_core, threadInfo.next_col_index);
-  }
-  else
-  {
-    threadInfo.state = RIGHT_ALLEND;
-  }
-
-	// TODO change state
-}
-
-// comm core
-void co_recv_row_token()
-{
-  unsigned short token;
-  LONG_GETR(token);
-
-  // TODO change state
-
-	if (IN_SOME_ROW(threadInfo.range, token))
-  {
-  	// send temp to token core
-  	send_row_data(dataInfo->tmp_buffer, dataInfo->tmp_data_index, token);
-  }
-  else // not in the same row
-  {
-  	// send temp to comm core
-  	send_row_data(dataInfo->tmp_buffer, dataInfo->tmp_data_index, threadInfo.rows_comm_core);
-  }
-
-  
-}
 
 void data_prepare(dataexchange_info_t* info, fft_param_t1* param)
 {
@@ -161,15 +72,6 @@ void data_prepare(dataexchange_info_t* info, fft_param_t1* param)
 	}
 }
 
-void init_data_exchange()
-{
-    threadInfo.exchange_info.recv_data_index = 0;
-    threadInfo.exchange_info.tmp_data_index = 0;
-
-    // cal mode bat or single
-    dataInfo = &threadInfo.exchange_info;
-}
-
 void send_row_data(FFT_TYPE* buffer, unsigned short length, unsigned short des)
 {
   int i;
@@ -192,6 +94,256 @@ void send_row_data(FFT_TYPE* buffer, unsigned short length, unsigned short des)
 	{
 		LONG_PUTR(buffer[i], col_index);
 	}
+}
+
+
+// normal core
+void n_recv_row_token()
+{
+  unsigned short token;
+  LONG_GETR(token);
+	
+	if (token != threadInfo.token)
+		threadInfo.token = token;
+
+	// TODO change state no->cu
+
+	if (IN_SOME_ROW(threadInfo.range, token))
+  {
+  	// send temp to token core
+  	send_row_data(dataInfo.tmp_buffer, dataInfo.tmp_data_index, token);
+  }
+  else // not in the same row
+  {
+  	// send temp to comm core
+  	send_row_data(dataInfo.tmp_buffer, dataInfo.tmp_data_index, threadInfo.rows_comm_core);
+  }
+
+  ++threadInfo.current_core;
+
+  if (threadInfo.current_core < threadInfo.cores_in_group)
+  {
+    // prepare next core data to temp
+    data_prepare(&dataInfo, &fft_param);
+  }
+  else
+  {
+    threadInfo.state = RIGHT_ALLEND;    
+  }
+  
+  // send token to next
+  LONG_PUTR(token, threadInfo.next_col_index);
+}
+
+// current core
+void cu_recv_row_token()
+{
+  unsigned short token;
+  LONG_GETR(token);
+	
+	if (token != threadInfo.token)
+		threadInfo.token = token;
+
+	++threadInfo.current_core;
+
+  if (threadInfo.current_core < threadInfo.cores_in_group)
+  {
+    // prepare next core data to temp
+    data_prepare(&dataInfo, &fft_param);
+    
+    threadInfo.state = RIGHT_RECVRTOKEN;
+
+    LONG_PUTC(threadInfo.current_core, threadInfo.next_col_index);
+  }
+  else
+  {
+    threadInfo.state = RIGHT_ALLEND;
+  }
+
+	// TODO change state cu->no
+}
+
+// current core
+void cu_recv_row_data()
+{
+  int i;
+  int length;
+  int index;
+
+  // get all cores data.
+  length = (threadInfo.cores_in_group - 1) * 80;
+
+  index = dataInfo->recv_data_index;
+  
+  for (i = 0; i < length; ++i)
+  {
+    if (dataInfo->recv_buffer_size <= index)
+    {
+      index = 0;
+    }
+    
+    LONG_GETR(dataInfo.recv_buffer[index]);
+
+    ++index;
+    
+    // 注意循环
+  }
+
+  dataInfo->recv_data_index = index;
+
+  dataInfo->recv_data_len += length;
+
+  threadInfo.state = RIGHT_RECVRTOKEN;
+}
+
+// comm core (current core in local row and not comm core itself)
+void co_recv_row_token()
+{
+  unsigned short token;
+  LONG_GETR(token);
+
+  if (token != threadInfo.token)
+		threadInfo.token = token;
+
+  // TODO change state co->cuco
+
+  // send temp to token core
+  send_row_data(dataInfo.tmp_buffer, dataInfo.tmp_data_index, token);
+
+  LONG_PUTC(token, threadInfo.next_row_index);
+
+  threadInfo.state = RIGHT_RECVCDATA;
+}
+
+void co_recv_col_data()
+{
+	unsigned short token;
+	int i,index,length,j;
+
+	token = threadInfo.token;
+
+  // recv all other row data.
+  // get all cores data.
+  j = threadInfo.cores_in_group - GET_ROW_CORES(threadInfo.range);
+  
+  length =  80;
+
+  index = 0;
+
+  while (0 < j)
+  {
+    for (i = 0; i < length; ++i)
+    { 
+      LONG_GETC(dataInfo.tmp_buffer[index]);
+
+      ++index;
+    
+      // 注意循环
+    }
+  
+    // send tmp data to current core
+    send_row_data(dataInfo.tmp_buffer, index, token);
+
+    ++j;
+  }
+  
+  // send token
+  LONG_PUTR(threadInfo.token, threadInfo.next_col.index);
+
+  threadInfo.state = RIGHT_RECVRTOKEN;
+}
+
+// current and comm core or current core in other row
+void cuco_recv_row_token()
+{
+	unsigned short token;
+	LONG_GETR(token);
+	
+	if (token != threadInfo.token)
+	  threadInfo.token = token;
+
+	if (IN_SOME_ROW(threadInfo.range, token))
+  {
+  	// send temp to token core
+  	send_row_data(dataInfo->tmp_buffer, dataInfo->tmp_data_index, token);
+
+    LONG_PUTC(token, threadInfo.next_row_index);
+
+    threadInfo.state = RIGHT_RECVCDATA;
+  }
+  else // not in the same row
+  {
+  	threadInfo.state = RIGHT_RECVCTOKEN;
+  } 
+
+  return;
+
+	
+
+	//++threadInfo.current_core;
+
+	//data_prepare(dataInfo, &fft_param);
+
+	//LONG_PUTR(threadInfo.current_core, threadInfo.next_col_index);
+
+	//threadInfo.state = RIGHT_RECVRDATA;
+
+}
+
+void cuco_recv_row_data()
+{
+  int i;
+  int length;
+  int index;
+
+  // get local row all cores data.
+  length = (GET_ROW_CORES(threadInfo.range) - 1) * 80;
+
+  index = dataInfo->recv_data_index;
+  
+  for (i = 0; i < length; ++i)
+  {
+    if (dataInfo->recv_buffer_size <= index)
+    {
+      index = 0;
+    }
+    
+    LONG_GETR(dataInfo.recv_buffer[index]);
+
+    ++index;
+    
+    // 注意循环
+  }
+
+  dataInfo->recv_data_index = index;
+
+  dataInfo->recv_data_len += length;
+
+  LONG_PUTC(threadInfo.token, threadInfo.next_row_index);
+
+  threadInfo.state = RIGHT_RECVCDATA;
+}
+
+void cuco_recv_col_token()
+{
+  unsigned short token;
+	LONG_GETC(token);
+
+}
+
+void cuco_recv_col_data()
+{
+}
+
+
+
+void init_data_exchange()
+{
+    threadInfo.exchange_info.recv_data_index = 0;
+    threadInfo.exchange_info.tmp_data_index = 0;
+
+    // cal mode bat or single
+    dataInfo = &threadInfo.exchange_info;
 }
 
 void start_data_exchange()
@@ -420,60 +572,10 @@ void recv_column_data()
 {
 }
 
-// normal core only current state and normal state
-void do_normal_data_exchange()
+void do_core_state_change(int new_state)
 {
-  while (true)
-	{
-		switch (threadInfo.state)
-		{
-			case RIGHT_RECVRTOKEN:
-			{
-				recv_row_token();
-			}
-			break;
-			case RIGHT_RECVRDATA:
-			{
-				recv_row_data();
-			}
-			break;
-			default:
-      return;
-		}
-	}
-}
+  int old_state;
 
-// communicate core
-void do_comm_data_exchange()
-{
-  while (true)
-	{
-		switch (threadInfo.state)
-		{
-			case RIGHT_RECVRTOKEN:
-			{
-				recv_row_token();
-			}
-			break;
-			case RIGHT_RECVRDATA:
-			{
-				recv_row_data();
-			}
-			break;
-			case RIGHT_RECVCTOKEN:
-      {
-        recv_column_token();
-      }
-      break;
-      case RIGHT_RECVCDATA:
-      {
-        recv_column_data();
-      }
-      break;
-			default:
-      return;
-		}
-	}
 }
 
 void do_data_exchange()
@@ -482,7 +584,6 @@ void do_data_exchange()
   {
     switch (threadInfo.state)
     {
-#if 1
       case RIGHT_RECVRTOKEN:
       {
         recv_row_token();
@@ -503,7 +604,6 @@ void do_data_exchange()
         recv_column_data();
       }
       break;
-#endif
 #if 0
       case SUBRIGHT_NORMAL_RECVRTOKEN:
       {

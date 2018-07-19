@@ -12,7 +12,7 @@ __thread_local FFT_TYPE w_ldm[KNUM] __attribute__((__aligned__(128)));
 
 __thread_local FFT_PARAM slaveParam;
 __thread_local THREADINFO threadInfo;
-__thread_local DATAEXCHANGE_INFO* dataInfo;
+__thread_local DATAEXCHANGE_INFO dataInfo;
 __thread_local FFT_PARAM fft_param;
 __thread_local volatile unsigned long get_reply, put_reply;
 __thread_local int thread_id = 0;
@@ -458,7 +458,6 @@ void init_data_exchange()
     threadInfo.exchange_info.tmp_data_index = 0;
 
     // cal mode bat or single
-    dataInfo = &threadInfo.exchange_info;
 }
 
 void start_data_exchange()
@@ -471,7 +470,7 @@ void start_data_exchange()
     threadInfo.recv_token_time = 1;
     
     // copy data to out
-    data_prepare(dataInfo, &fft_param);
+    data_prepare(&dataInfo, &fft_param);
 
     if (!IS_SINGLE_CORE(threadInfo.next_col_index))
     {
@@ -489,7 +488,7 @@ void start_data_exchange()
     threadInfo.recv_token_time = 0;
     
     // copy data to temp
-    data_prepare(dataInfo, &fft_param);
+    data_prepare(&dataInfo, &fft_param);
 
     if (!IS_SINGLE_CORE(threadInfo.next_col_index))
       threadInfo.state = RIGHT_RECVRTOKEN;
@@ -515,7 +514,7 @@ void normal_recv_row_token()
 	if (IN_SOME_ROW(threadInfo.range, token))
   {
   	// send temp to token core
-  	send_row_data(dataInfo->tmp_buffer, dataInfo->tmp_data_index, token);
+  	send_row_data(dataInfo.tmp_buffer, dataInfo.tmp_data_index, token);
 
   	if (threadInfo.logic_id == threadInfo.rows_comm_core)
   	{
@@ -529,7 +528,7 @@ void normal_recv_row_token()
   	if (threadInfo.logic_id != threadInfo.rows_comm_core)
   	{
   	   // send temp to comm core
-  	   send_row_data(dataInfo->tmp_buffer, dataInfo->tmp_data_index, threadInfo.rows_comm_core);
+  	   send_row_data(dataInfo.tmp_buffer, dataInfo.tmp_data_index, threadInfo.rows_comm_core);
   	}
   	else
   	{
@@ -550,7 +549,7 @@ void normal_recv_row_token()
   // TODO:end 
   		
   // prepare next core data to temp
-  data_prepare(dataInfo, &fft_param);
+  data_prepare(&dataInfo, &fft_param);
 
   // send token to next
   LONG_PUTR(token, threadInfo.next_col_index);
@@ -680,11 +679,11 @@ void recv_row_data()
   	length = threadInfo.cores_in_group * 80;
   }
 
-  index = dataInfo->recv_data_index;
+  index = dataInfo.recv_data_index;
   
   for (i = 0; i < length; ++i)
   {
-    if (dataInfo->recv_buffer_size <= index)
+    if (dataInfo.recv_buffer_size <= index)
     {
       index = 0;
     }
@@ -695,7 +694,7 @@ void recv_row_data()
     // ×¢ÒâÑ­»·
   }
 
-  dataInfo->recv_data_index = index;
+  dataInfo.recv_data_index = index;
 }
 
 void recv_column_token()

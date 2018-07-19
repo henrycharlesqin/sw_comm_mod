@@ -55,7 +55,7 @@
 #define IS_SINGLE_CORE(next_core_index) (next_core_index == 0x0FF)
 #define BEGIN_CORE_AROW(range) (range & 0x0FF)
 #define END_CORE_AROW(range) ((range & 0x0FF00) >>8)
-#define GET_ROW_CORES(range) ((range & 0x0FF00) >>8) - (range & 0x0FF))
+#define GET_ROW_CORES(range) ((range & 0x0FF00) >>8) - (range & 0x0FF) + 1)
 
 #define IN_RECV_RANGE(recv_data_range, index) ((((recv_data_range & 0x0FFFF0000) >> 16) <= index) && (index <= (recv_data_range & 0x0FFFF)))
 #define OUT_RECV_RANGE(recv_data_range, index) (index > (recv_data_range & 0x0FFFF))
@@ -227,9 +227,7 @@ typedef struct
 	unsigned char current_row;      // row number in group.
 	unsigned char state;
 	unsigned char recv_token_time;
-	unsigned char core_group_map[MAX_RCORE][MAX_CCORE];  // current group is including which slave cores .	If not included , value is 0x0FF, otherwise value is logic_id.
-	dataexchange_info_t exchange_info;
-	
+	unsigned char core_group_map[MAX_RCORE][MAX_CCORE];  // current group is including which slave cores .	If not included , value is 0x0FF, otherwise value is logic_id.	
 }threadinfo_t;
 
 typedef threadinfo_t THREADINFO;
