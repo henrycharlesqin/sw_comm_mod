@@ -87,23 +87,12 @@ asm volatile ("getc %0\n":"=r"(var)::"memory")
 #define RIGHT_RECVRDATA 2
 #define RIGHT_RECVCTOKEN 3
 #define RIGHT_RECVCDATA 4
-#define SUBRIGHT_NORMAL_RECVRTOKEN 5
-#define SUBRIGHT_CURRENT_RECVRTOKEN 6
-#define SUBRIGHT_NORMAL_RECVRDATA 7 // no use
-#define SUBRIGHT_CURRENT_RECVRDATA 8
-#define SUBRIGHT_COMM_RECVCDATA 9
-#define SUBRIGHT_CURRENT_RECVCDATA 10
-#define SUBRIGHT_SINGLE_RECVCDATA 11
-#define SUBRIGHT_COMM_RECVCTOKEN 12
-#define SUBRIGHT_CURRENT_RECVCTOKEN 13
-#define SUBRIGHT_SINGLE_RECVCTOKEN 14
-
-
-#define CORE_STATE_CN  1 // current and normal core
-#define CORE_STATE_CC  2 // current comm core
-#define CORE_STATE_CNC 3 // current normal comm core
-
 #define RIGHT_ALLEND 100
+
+#define CORE_STATE_CU    1 // current core (logic_id == token)
+#define CORE_STATE_N     2 // normal core
+#define CORE_STATE_CO    3 // comm core(can communicate each rows)
+#define CORE_STATE_CUCO  4 // current comm core or comm core which has current core in other rows
 
 typedef struct{
 	float re;

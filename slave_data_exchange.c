@@ -96,6 +96,72 @@ void send_row_data(FFT_TYPE* buffer, unsigned short length, unsigned short des)
 	}
 }
 
+inline unsigned short get_token_row_inex(unsigned short token)
+{
+	int i;
+	short dis = 0;
+	short row_index;
+	
+	unsigned short begin = GET_LOWER_8BITS(threadInfo.range);
+	unsigned short end	= GET_HIGHER_8BITS(threadInfo.range);
+	
+	if (token > end)
+	{
+		while (end < token)
+		{
+			++dis;
+			end += MAX_CCORE;
+		}
+	}
+	else if (token < begin)
+	{
+		while (token < begin)
+		{
+			--dis;
+			begin -= MAX_CCORE;
+		}
+	}
+	
+	row_index = CORE_ROW(threadInfo.physical_id) + dis;
+
+	return row_index;
+
+}
+
+void send_column_data(FFT_TYPE* buffer, unsigned short length, unsigned short des)
+{
+  int i;
+  short dis = 0;
+  short row_index;
+
+	unsigned short begin = GET_LOWER_8BITS(threadInfo.range);
+  unsigned short end  = GET_HIGHER_8BITS(threadInfo.range);
+
+  if (des > end)
+  {
+  	while (end < des)
+  	{
+  		++dis;
+  		end += MAX_CCORE;
+  	}
+  }
+  else if (des < begin)
+  {
+  	while (des < begin)
+  	{
+  	  --dis;
+  	  begin -= MAX_CCORE;
+  	}
+  }
+
+  row_index = CORE_ROW(threadInfo.physical_id) + dis;
+
+  for (i = 0; i < length; ++i)
+  {
+    LONG_PUTC(buffer[i], row_index);
+  }
+  	
+}
 
 // normal core
 void n_recv_row_token()
@@ -193,7 +259,13 @@ void cu_recv_row_data()
 
   dataInfo->recv_data_len += length;
 
-  threadInfo.state = RIGHT_RECVRTOKEN;
+  ++threadInfo.current_core;
+
+  data_prepare(dataInfo, &fft_param);
+
+  LONG_PUTR(threadInfo.current_core, threadInfo.next_col_index);
+
+  //TODO change core state
 }
 
 // comm core (current core in local row and not comm core itself)
@@ -253,42 +325,8 @@ void co_recv_col_data()
   threadInfo.state = RIGHT_RECVRTOKEN;
 }
 
-// current and comm core or current core in other row
-void cuco_recv_row_token()
-{
-	unsigned short token;
-	LONG_GETR(token);
-	
-	if (token != threadInfo.token)
-	  threadInfo.token = token;
-
-	if (IN_SOME_ROW(threadInfo.range, token))
-  {
-  	// send temp to token core
-  	send_row_data(dataInfo->tmp_buffer, dataInfo->tmp_data_index, token);
-
-    LONG_PUTC(token, threadInfo.next_row_index);
-
-    threadInfo.state = RIGHT_RECVCDATA;
-  }
-  else // not in the same row
-  {
-  	threadInfo.state = RIGHT_RECVCTOKEN;
-  } 
-
-  return;
-
-	
-
-	//++threadInfo.current_core;
-
-	//data_prepare(dataInfo, &fft_param);
-
-	//LONG_PUTR(threadInfo.current_core, threadInfo.next_col_index);
-
-	//threadInfo.state = RIGHT_RECVRDATA;
-
-}
+// current and comm core or current core in other row 
+// no need void cuco_recv_row_token()
 
 void cuco_recv_row_data()
 {
@@ -299,40 +337,109 @@ void cuco_recv_row_data()
   // get local row all cores data.
   length = (GET_ROW_CORES(threadInfo.range) - 1) * 80;
 
-  index = dataInfo->recv_data_index;
-  
-  for (i = 0; i < length; ++i)
+  if (threadInfo.logic_id != threadInfo.token)
   {
-    if (dataInfo->recv_buffer_size <= index)
+    index = dataInfo.recv_data_index;
+  
+    for (i = 0; i < length; ++i)
     {
-      index = 0;
+      if (dataInfo.recv_buffer_size <= index)
+      {
+        index = 0;
+      }
+    
+      LONG_GETR(dataInfo.recv_buffer[index]);
+
+      ++index;
+    
+     // 注意循环
     }
-    
-    LONG_GETR(dataInfo.recv_buffer[index]);
+    dataInfo->recv_data_index = index;
 
-    ++index;
-    
-    // 注意循环
+    dataInfo->recv_data_len += length;
   }
+  else
+  {
+    index = dataInfo.tmp_data_index;
 
-  dataInfo->recv_data_index = index;
+    for (i = 0; i < length; ++i)
+    {
+      LONG_GETR(dataInfo.tmp_buffer[index]);
 
-  dataInfo->recv_data_len += length;
-
+      ++index;
+    }
+  }
+  
   LONG_PUTC(threadInfo.token, threadInfo.next_row_index);
 
   threadInfo.state = RIGHT_RECVCDATA;
 }
+
 
 void cuco_recv_col_token()
 {
   unsigned short token;
 	LONG_GETC(token);
 
+	if (threadInfo.token != token)
+	  threadInfo.token = token;
+
+	send_column_data(dataInfo.tmp_buffer, dataInfo.tmp_data_index, token);
+
+	++threadInfo.current_core;
+
+  data_prepare(dataInfo, &fft_param);
+
+  if (threadInfo.next_col_index != get_token_row_inex(token))
+    LONG_PUTR(threadInfo.current_core, threadInfo.next_col_index);
+
+  // TODO core state change
 }
 
 void cuco_recv_col_data()
 {
+  unsigned short token;
+	int i,index,length,j;
+	
+	token = threadInfo.token;
+	
+	// recv all other row data.
+	// get all cores data.
+	j = threadInfo.cores_in_group - GET_ROW_CORES(threadInfo.range);
+		
+	length =	80;
+	
+	index = dataInfo.recv_data_index;
+	
+	while (0 < j)
+	{
+		for (i = 0; i < length; ++i)
+		{ 
+		  if (dataInfo.recv_buffer_size <= index)
+      {
+        index = 0;
+      }
+      
+			LONG_GETC(dataInfo.recv_buffer[index]);
+	
+			++index;			
+			// 注意循环
+		}
+		++j;
+
+		dataInfo.recv_data_len += index;
+	}
+
+	++threadInfo.current_core;
+
+  data_prepare(dataInfo, &fft_param);
+		
+	// send token
+	LONG_PUTR(threadInfo.token, threadInfo.next_col.index);
+
+	threadInfo.state = RIGHT_RECVRTOKEN;
+
+	// TODO change core state
 }
 
 
@@ -388,190 +495,6 @@ inline void end_data_exchange()
   threadInfo.token = 0;
 }
 
-// normal core recv row token
-void normal_recv_row_token()
-{
-	unsigned short token;
-  LONG_GETR(token);
-	
-	if (token != threadInfo.token)
-		threadInfo.token = token;
-
-	if (IN_SOME_ROW(threadInfo.range, token))
-  {
-  	// send temp to token core
-  	send_row_data(dataInfo->tmp_buffer, dataInfo->tmp_data_index, token);
-
-  	if (threadInfo.logic_id == threadInfo.rows_comm_core)
-  	{
-      LONG_PUTC(token, threadInfo.next_row_index);
-      threadInfo.state = SUBRIGHT_COMM_RECVCDATA;
-  		return;
-  	}
-  }
-  else // not in the same row
-  {
-  	if (threadInfo.logic_id != threadInfo.rows_comm_core)
-  	{
-  	   // send temp to comm core
-  	   send_row_data(dataInfo->tmp_buffer, dataInfo->tmp_data_index, threadInfo.rows_comm_core);
-  	}
-  	else
-  	{
-  	   threadInfo.state = SUBRIGHT_COMM_RECVCTOKEN;
-  		 return; 
-  		 // to next row
-  		  
-  		 //send_row_data(dataInfo->tmp_buffer, dataInfo->tmp_data_index, threadInfo.rows_comm_core);
-
-  		 //++threadInfo.current_core;
-
-  		 //data_prepare(dataInfo, &fft_param);
-  	}
-  }
-
-  ++threadInfo.current_core;
-
-  // TODO:end 
-  		
-  // prepare next core data to temp
-  data_prepare(dataInfo, &fft_param);
-
-  // send token to next
-  LONG_PUTR(token, threadInfo.next_col_index);
-
-  // end
-}
-
-// current core recv row token (token == logic_id)
-void current_recv_row_token()
-{
-	unsigned short token;
-  LONG_GETR(token);
-
-  ++threadInfo.recv_token_time;
-  if (1 == threadInfo.recv_token_time)
-  {
-  	// copy data to out
-    threadInfo.state = SUBRIGHT_CURRENT_RECVRDATA;
-
-    LONG_PUTC(token, threadInfo.next_col_index);
-  }
-  else if (2 == threadInfo.recv_token_time)
-  {
-    threadInfo.recv_token_time = 0;
-
-    if (threadInfo.logic_id == threadInfo.rows_comm_core)
-  	{
-      LONG_PUTC(token, threadInfo.next_row_index);
-      threadInfo.state = SUBRIGHT_COMM_RECVCDATA;
-  		return;
-  	}
-      
-    ++threadInfo.current_core;
-
-    if (threadInfo.current_core < threadInfo.cores_in_group)
-    {
-      threadInfo.state = SUBRIGHT_NORMAL_RECVRTOKEN;
-
-      LONG_PUTC(threadInfo.current_core, threadInfo.next_col_index);
-    }
-    else
-    {
-      threadInfo.state = RIGHT_ALLEND;
-        
-      //LONG_PUTC(token, threadInfo.next_col_index);  last recv token.
-    }
-  }
-}
-
-void current_recv_row_data()
-{
-
-}
-
-void comm_recv_row_data()
-{
-}
-
-void send_column_data(FFT_TYPE* buffer, unsigned short length, unsigned short des)
-{
-  int i;
-  short dis = 0;
-  short row_index;
-
-	unsigned short begin = GET_LOWER_8BITS(threadInfo.range);
-  unsigned short end  = GET_HIGHER_8BITS(threadInfo.range);
-
-  if (des > end)
-  {
-  	while (end < des)
-  	{
-  		++dis;
-  		end += MAX_CCORE;
-  	}
-  }
-  else if (des < begin)
-  {
-  	while (des < begin)
-  	{
-  	  --dis;
-  	  begin -= MAX_CCORE;
-  	}
-  }
-
-  row_index = CORE_ROW(threadInfo.physical_id) + dis;
-
-  for (i = 0; i < length; ++i)
-  {
-    LONG_PUTC(buffer[i], row_index);
-  }
-  	
-}
-
-void recv_row_data()
-{
-  int i;
-  int length;
-  int index;
-
-  // 判断是否为行将通信的core，如果是，通信长度为本行所有数据长
-  // 如果不是等待接收网络中所有数据
-  if (threadInfo.logic_id != threadInfo.rows_comm_core)
-  {
-  	length = (GET_ROW_CORES(threadInfo.range) + 1) * 80;
-  }
-  else
-  {
-  	length = threadInfo.cores_in_group * 80;
-  }
-
-  index = dataInfo->recv_data_index;
-  
-  for (i = 0; i < length; ++i)
-  {
-    if (dataInfo->recv_buffer_size <= index)
-    {
-      index = 0;
-    }
-    
-    LONG_GETR(dataInfo.recv_buffer[index]);
-
-    ++index;
-    // 注意循环
-  }
-
-  dataInfo->recv_data_index = index;
-}
-
-void recv_column_token()
-{
-}
-
-void recv_column_data()
-{
-}
-
 void do_core_state_change(int new_state)
 {
   int old_state;
@@ -604,36 +527,6 @@ void do_data_exchange()
         recv_column_data();
       }
       break;
-#if 0
-      case SUBRIGHT_NORMAL_RECVRTOKEN:
-      {
-        normal_recv_row_token();
-      }
-      break;
-      case SUBRIGHT_CURRENT_RECVRTOKEN:
-      {
-        current_recv_row_token();
-      }
-      break;
-      case SUBRIGHT_NORMAL_RECVRDATA:
-      break
-      case SUBRIGHT_CURRENT_RECVRDATA:
-      break;
-      case SUBRIGHT_COMM_RECVCDATA:
-      break;
-      case SUBRIGHT_CURRENT_RECVCDATA:
-      break;
-      case SUBRIGHT_SINGLE_RECVCDATA:
-      break;
-      case SUBRIGHT_COMM_RECVCTOKEN:
-      break;
-      case SUBRIGHT_CURRENT_RECVCTOKEN:
-      break;
-      case SUBRIGHT_SINGLE_RECVCTOKEN:
-      break;
-      default:
-      break;
-#endif
     }
   }
 }
