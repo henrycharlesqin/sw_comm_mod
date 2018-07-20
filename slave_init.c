@@ -274,6 +274,11 @@ static void init_row_range()
 	      threadInfo.next_row_index = row_index - (threadInfo.rows_in_group - 1);
 	    }
 		}
+
+		if (0 == threadInfo.rows_in_group)
+		{
+		  threadInfo.rows_in_group = 1;
+		}
 }
 
 unsigned short init_threadinfo(int thread_id)
@@ -337,6 +342,57 @@ unsigned short init_threadinfo(int thread_id)
 	}
 
 	threadInfo.recv_data_range = SET_32BITS_PARAM(start_recvdata_index, end_recvdata_index);
+
+	if (1 == threadInfo.rows_in_group)
+	{
+	  if (0 == threadInfo.logic_id)
+	  {
+	    threadInfo.core_state = CORE_STATE_CU;
+	  }
+	  else
+	  {
+	    threadInfo.core_state = CORE_STATE_N;
+	  }
+	}
+	else // multi rows
+	{
+	  if (IN_SOME_ROW(threadInfo.range, 0))
+	  {
+	    if (0 == threadInfo.logic_id)
+	    {
+	      if (0 == threadInfo.rows_comm_core)
+	      {
+	        threadInfo.core_state = CORE_STATE_CUCO;
+	      }
+	      else
+	      {
+	        threadInfo.core_state = CORE_STATE_CU;
+	      }
+	    }
+	    else
+	    {
+	      if (threadInfo.logic_id != threadInfo.rows_comm_core)
+	      {
+	        threadInfo.core_state = CORE_STATE_N;
+	      }
+	      else
+	      {
+	        threadInfo.core_state = CORE_STATE_CO
+	      }
+	    }
+	  }
+	  else
+	  {
+	    if ((threadInfo.logic_id != threadInfo.rows_comm_core) && (0x0FF != threadInfo.rows_comm_core))
+	    {
+	      threadInfo.core_state = CORE_STATE_N;
+	    }
+	    else
+	    {
+	      threadInfo.core_state = CORE_STATE_CUCO;
+	    }
+	  }
+	}
 	
 	return RET_OK
 }

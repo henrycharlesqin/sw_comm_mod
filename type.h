@@ -190,6 +190,7 @@ typedef void (*data_send_ptr)(dataexchange_info_t*, fft_param_t1*);
 typedef void (*data_recv_ptr)(dataexchange_info_t*, fft_param_t1*);
 
 typedef dataexchange_info_t DATAEXCHANGE_INFO;
+typedef dataexchange_func_t DATAEXCHANGE_FUNC;
 
 #define DIR_RIGHT 1
 #define DIR_LEFT  2
@@ -200,7 +201,6 @@ typedef struct
 	unsigned short group_id;        // group id(one core can restore 2000B data, so when N is bigger than 2000B. we divided N by multi-slave cores. this multi-slave cores are called a group)
 	unsigned short logic_id;        // when we use full core-array logic_id equal physical_id, but in common we divited cores into many groups, so logic_id is id in a group.
 	unsigned short physical_id;		  // thread_id
-	unsigned short correct_val;     // address correct value for logic_id, when logic_id plus correct_value show the core whether the first or last column core.
 	unsigned short core_rc_index;   // higher 8 bits column index lower 8 bits row index
 	unsigned short next_col_index;  // transfer token to next core higher 8 bits column index lower 8 bits row index(only column index  or row index valid, invalid index is 0)
 	unsigned short next_row_index;
@@ -209,13 +209,13 @@ typedef struct
 	unsigned short direction;       // show cores communicate direction.
 	unsigned short range;           // show cores logic id from a to b in same row of a group. lower 8 bits begin, higher 8 bits end.
 	unsigned short token;
+	unsigned short core_state;      // core status.
 	unsigned int  recv_data_rem;    // recieve data remainder
 	unsigned int  recv_data_range;  // high 16 bit start low 16 bit end
 	unsigned char cores_in_group;   // cores in a group
 	unsigned char rows_in_group;    // group contains the number of core rows.
 	unsigned char current_row;      // row number in group.
 	unsigned char state;
-	unsigned char recv_token_time;
 	unsigned char core_group_map[MAX_RCORE][MAX_CCORE];  // current group is including which slave cores .	If not included , value is 0x0FF, otherwise value is logic_id.	
 }threadinfo_t;
 
