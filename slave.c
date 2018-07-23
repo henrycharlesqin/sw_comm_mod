@@ -14,6 +14,9 @@ __thread_local FFT_PARAM slaveParam;
 __thread_local THREADINFO threadInfo;
 __thread_local DATAEXCHANGE_INFO dataInfo;
 __thread_local FFT_PARAM fft_param;
+__thread_local FFT_MSG_PARAM fft_msg;
+__thread_local DATAEXCHANGE_FUNC exchangeFunc;
+
 __thread_local volatile unsigned long get_reply, put_reply;
 __thread_local int thread_id = 0;
 __thread_local unsigned int pre_rows = 0; // 记录本核之前其他核所读取的行数之和
@@ -38,17 +41,17 @@ __thread_local FFT_TYPE W25[] __attribute__((__aligned__(16))) =
 };
 
 /*默认该数组id升序排列，如数组未满最后一个放0 */
-FFT_FUNC n_func_array[NUM_32] = 
+__thread_local FFT_FUNC n_func_array[NUM_32] = 
 {
-	{20, n2fv_20},
-	{32, n2fv_32},
+	//{20, n2fv_20},
+	//{32, n2fv_32},
 	FFT_FUNC_END
 };
 
-FFT_FUNC t_func_array[NUM_32] =
+__thread_local FFT_FUNC t_func_array[NUM_32] =
 {
-	{20, t3fv_20},
-	{25, t3fv_25},
+	//{20, t3fv_20},
+	//{25, t3fv_25},
 	FFT_FUNC_END
 };
 
@@ -70,19 +73,19 @@ void fft_solve(FFT_STEP* step, int row)
 	if ((NUM_20 == step->circle_max) && (STEP_1 == slaveParam.current))
 	{
 		// nxfvx
-		n2fv_20(0, 2 , buf_ldm, out_ldm);
+		//n2fv_20(0, 2 , buf_ldm, out_ldm);
 	}
 	else if ((NUM_20 == step->circle_max) && (STEP_2 == slaveParam.current))
 	{
 		offset = thread_id * step->wrs;
-		t3fv_20(0, 2, &w_ldm[offset], buf_ldm);
+		//t3fv_20(0, 2, &w_ldm[offset], buf_ldm);
 	}
 	else if ((NUM_25 == step->circle_max) && ((STEP_2 == slaveParam.current) || (STEP_3 == slaveParam.current)))
 	{     
 		if (1 == row)
 		{
 			offset = pre_rows * step->wrs;
-			t3fv_25(0, 2, &W25[offset], buf_ldm);
+			//t3fv_25(0, 2, &W25[offset], buf_ldm);
 		}
 		else
 		{
@@ -96,7 +99,7 @@ void fft_solve(FFT_STEP* step, int row)
                     tmp_ldm[j].re = buf_ldm[j + i*NUM_25*2].re;
                     tmp_ldm[j].im = buf_ldm[j + i*NUM_25*2].im;
                 }  
-                t3fv_25(0, 2, &w_ldm[offset], tmp_ldm);
+                //t3fv_25(0, 2, &w_ldm[offset], tmp_ldm);
                 for (j = 0; j < NUM_25*2; ++j)
                 {
                     buf_ldm[j + i*NUM_25*2].re = tmp_ldm[j].re;
@@ -107,7 +110,7 @@ void fft_solve(FFT_STEP* step, int row)
 	}
 	else if ((NUM_32 == step->circle_max) && (STEP_1 == slaveParam.current))
 	{
-		n2fv_32(0, 2, buf_ldm, out_ldm);
+		//n2fv_32(0, 2, buf_ldm, out_ldm);
 	}
 }
 
@@ -248,10 +251,10 @@ void fft_func_proc(void* param)
 	// 计算当前step index,该步骤默认为0，因为init进入
 	current = slaveParam.current;
 
-    if ((STEP_1 == current) || (STEP_2 == current))
-    {
+  if ((STEP_1 == current) || (STEP_2 == current))
+  {
 		step = &slaveParam.steps1[current];
-    }
+  }
 	else if (STEP_3 == current)
 	{
 		step = &slaveParam.steps2[0];
@@ -293,7 +296,7 @@ void fft_func_proc(void* param)
 	// 计算读取的数据，因为使用simd故个数需要乘以2
 	srow_length = sizeof(FFT_TYPE) * step->circle_max;
 	arow_length = srow_length * 2;
-    total_length = arow_length * row;
+  total_length = arow_length * row;
 	offset = pre_rows * arow_length;
 	athread_get (PE_MODE, (void *)step->input + offset, (void*)&buf_ldm[0], total_length, (void *)&get_reply, 0, 0, 0);
 	asm ("memb");
@@ -332,7 +335,19 @@ void fft_func_proc(void* param)
 
 void fft_func_test(void* param)
 {
+	thread_id = athread_get_id(-1);
+
+	init_threadinfo(thread_id, 10000);
+
 	//
+	init_data_exchange();
+
+	start_data_exchange();
+
+	do_data_exchange();
+
+	end_data_exchange();
+	
 }
 
 void call_fft_func(int type, int id)
@@ -340,49 +355,7 @@ void call_fft_func(int type, int id)
 	int i = 0;
 	switch (type)
 	{
-		case FUNC_TYPE_N:
-			for (; i < FUNC_ARRAY_SIZE(n_func_array); ++i)
-			{
-				FFT_FUNC* p = n_func_array[i];
-				if (NULL == p)
-					break;
-
-				if (id < p->id) // 默认数组升序排列
-				{
-					break;
-				}
-				
-				if (id == p->id)
-				{
-					if (NULL != p->func())
-					{
-					    p->func();
-					    break;
-					}
-				}
-			}
-			break;
-		case FUNC_TYPE_T:
-			for (; i < FUNC_ARRAY_SIZE(t_func_array); ++i)
-			{
-				FFT_FUNC* p = t_func_array[i];
-				if (NULL == p)
-					break;
-
-				if (id < p->id) // 默认数组升序排列
-				{
-					break;
-				}
-
-				if (id == p->id)				
-				{
-					p->func();
-					break;
-				}
-			}
-			break;
-		default:
-			break;
+		
 				
 	}
 

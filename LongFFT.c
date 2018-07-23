@@ -481,7 +481,8 @@ int main(int argc, char *argv[])
 	
 	st = rpcc();
 	// ½øÐÐ¼ÆËã
-	ret = fft_cal(InputBuf, OutputBuf, N, N);
+	//ret = fft_cal(InputBuf, OutputBuf, N, N);
+	fft_process_test(NULL);
 	ed = rpcc();
 
 	if (RET_OK == ret)

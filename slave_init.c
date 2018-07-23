@@ -5,9 +5,9 @@
 
 extern __thread_local FFT_PARAM slaveParam;
 extern __thread_local THREADINFO threadInfo;
-extern __thread_local DATAEXCHANGE_INFO* dataInfo;
+extern __thread_local DATAEXCHANGE_INFO dataInfo;
 extern __thread_local FFT_PARAM fft_param;
-extern __thread_local int thread_id = 0;
+extern __thread_local int thread_id;
 
 
 // util.c
@@ -185,7 +185,7 @@ static void init_row_range()
       // next core
 		  if (end >= (unsigned char)(threadInfo.logic_id + 1))
 		  {
-		    threadInfo.next_col_index = col_index + 1
+		    threadInfo.next_col_index = col_index + 1;
 		  }
 		  else
 		  {
@@ -204,7 +204,7 @@ static void init_row_range()
 		  // next core
 		  if (begin >= (unsigned char)(threadInfo.logic_id + 1))
 		  {
-		    threadInfo.next_col_index = col_index - 1
+		    threadInfo.next_col_index = col_index - 1;
 		  }
 		  else
 		  {
@@ -257,7 +257,7 @@ static void init_row_range()
 		if (threadInfo.logic_id == threadInfo.rows_comm_core)
 		{
 			row_index = CORE_ROW(threadInfo.physical_id);
-	    col_index
+	    col_index = CORE_COL(threadInfo.physical_id);
 	    if ((row_index + 1) < MAX_RCORE)
 	    {
 	      if (0x0FF != threadInfo.core_group_map[row_index + 1][col_index])
@@ -281,7 +281,7 @@ static void init_row_range()
 		}
 }
 
-unsigned short init_threadinfo(int thread_id)
+unsigned short init_threadinfo(int thread_id, int N)
 {
 	// cal multi-core read N/n
 	int mod = 0;
@@ -302,7 +302,7 @@ unsigned short init_threadinfo(int thread_id)
 	{
 	  cores_per_group = quo;
 	  threadInfo.recv_data_rem = 0;
-	  threadInfo.exchange_info.input_buffer_size = N / cores_per_group;
+	  dataInfo.input_buffer_size = N / cores_per_group;
 	}
 	else
 	{
@@ -310,9 +310,9 @@ unsigned short init_threadinfo(int thread_id)
 		mod1 = N % cores_per_group;
 		threadInfo.recv_data_rem = mod1;
 		if ( 0 == threadInfo.logic_id)
-	  	threadInfo.exchange_info.input_buffer_size = N / cores_per_group + mod1;
+	  	dataInfo.input_buffer_size = N / cores_per_group + mod1;
 	  else
-	    threadInfo.exchange_info.input_buffer_size = N / cores_per_group;
+	    dataInfo.input_buffer_size = N / cores_per_group;
 	}
 
 	// group id
@@ -333,12 +333,12 @@ unsigned short init_threadinfo(int thread_id)
 	if (0  == j)
 	{
 	  start_recvdata_index = 0;
-	  end_recvdata_index = threadInfo.exchange_info.input_buffer_size - 1;
+	  end_recvdata_index = dataInfo.input_buffer_size - 1;
 	}
 	else
 	{
-	  start_recvdata_index = j * threadInfo.exchange_info.input_buffer_size + mod1;
-	  end_recvdata_index = (j + 1) * threadInfo.exchange_info.input_buffer_size + mod1 - 1;
+	  start_recvdata_index = j * dataInfo.input_buffer_size + mod1;
+	  end_recvdata_index = (j + 1) * dataInfo.input_buffer_size + mod1 - 1;
 	}
 
 	threadInfo.recv_data_range = SET_32BITS_PARAM(start_recvdata_index, end_recvdata_index);
@@ -377,7 +377,7 @@ unsigned short init_threadinfo(int thread_id)
 	      }
 	      else
 	      {
-	        threadInfo.core_state = CORE_STATE_CO
+	        threadInfo.core_state = CORE_STATE_CO;
 	      }
 	    }
 	  }
@@ -394,8 +394,8 @@ unsigned short init_threadinfo(int thread_id)
 	  }
 	}
 	
-	return RET_OK
-}
+	return RET_OK;
+	}
 
 
 

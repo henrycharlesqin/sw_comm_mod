@@ -29,8 +29,8 @@
 #define STEP_3 2
 
 /*函数指针类型*/
-#define FUNC_TYPE_N 1;
-#define FUNC_TYPE_T 2;
+#define FUNC_TYPE_N 1
+#define FUNC_TYPE_T 2
 
 
 /* 计算*/
@@ -55,7 +55,7 @@
 #define IS_SINGLE_CORE(next_core_index) (next_core_index == 0x0FF)
 #define BEGIN_CORE_AROW(range) (range & 0x0FF)
 #define END_CORE_AROW(range) ((range & 0x0FF00) >>8)
-#define GET_ROW_CORES(range) ((range & 0x0FF00) >>8) - (range & 0x0FF) + 1)
+#define GET_ROW_CORES(range) (((range & 0x0FF00) >>8) - (range & 0x0FF) + 1)
 
 #define IN_RECV_RANGE(recv_data_range, index) ((((recv_data_range & 0x0FFFF0000) >> 16) <= index) && (index <= (recv_data_range & 0x0FFFF)))
 #define OUT_RECV_RANGE(recv_data_range, index) (index > (recv_data_range & 0x0FFFF))
