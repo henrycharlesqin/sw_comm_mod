@@ -335,11 +335,60 @@ void fft_func_proc(void* param)
 
 void fft_func_test(void* param)
 {
+  int i,j;
 	thread_id = athread_get_id(-1);
 
-	init_threadinfo(thread_id, 10000);
+	fft_msg.bufstride = 20;
+	fft_msg.is = 25;
+	fft_msg.ivs = 500;
+	fft_msg.n = 20;
+	fft_msg.v1 = 20;
+
+	init_threadinfo(10000);
+
+
+	if (0 != threadInfo.group_id)
+	  return;
+
+	//if (0 != thread_id)
+	  //return;
+#if 1
+  //printf("%d", threadInfo.physical_id);
+  //printf("%d", threadInfo.group_id);
+	//printf("%d", threadInfo.logic_id);
+	//printf("%d", threadInfo.direction);
+	//printf("%d", threadInfo.cores_in_group);
+	//printf("%x", threadInfo.rows_comm_core);
+	//printf("%d", threadInfo.rows_in_group);
+	//printf("%x", threadInfo.range);
+	//printf("%x", threadInfo.next_col_index);
+	//printf("%x", threadInfo.next_row_index);
+	//printf("%d", threadInfo.core_state);
+  //printf("%d", threadInfo.rows_in_group);
+  //printf("%d", dataInfo.recv_data_range);
+#endif
 
 	//
+#if 0
+	if (15 == thread_id)
+	{
+	  for (i = 0; i < MAX_RCORE; ++i)
+	  {
+	    printf("\n");
+	    for (j = 0; j < MAX_CCORE; ++j)
+	    {
+	      printf("%d", threadInfo.core_group_map[i][j]);
+	    }
+	  }
+	  return;
+	}
+	else
+	{
+	  return;
+	}
+#endif
+  return;
+
 	init_data_exchange();
 
 	start_data_exchange();

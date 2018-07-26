@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include "slave.h"
 #include "dma.h"
+#include "ldm_malloc.h"
 #include "type.h"
 
 extern __thread_local FFT_PARAM slaveParam;
@@ -33,14 +34,14 @@ void data_prepare(fft_param_t1* param)
 	    for (i0 = 0; i0 < param->n; ++i0)
 	    {
 	      index = i0 * is + i1 * ivs;
-	    	if (IN_RECV_RANGE(threadInfo.recv_data_range ,index))
+	    	if (IN_RECV_RANGE(dataInfo.recv_data_range ,index))
 	    	{
 	    	  // i0 * bufstride + i1 * 1
-	        recv[i0 * bufstride + i1 * 1].re = input[index].re; // bufstride 44(20)  is 50(25) ivs 1000(500)
-	        recv[i0 * bufstride + i1 * 1].im = input[index].im;
+	        recv[i1 * bufstride + i0 * 1].re = input[index].re; // bufstride 44(20)  is 50(25) ivs 1000(500)
+	        recv[i1 * bufstride + i0 * 1].im = input[index].im;
 	        ++dataInfo.recv_data_len;
 	      }
-	      else if (OUT_RECV_RANGE(threadInfo.recv_data_range ,index))
+	      else if (OUT_RECV_RANGE(dataInfo.recv_data_range ,index))
 	      {
 	      	break;
 	      }
@@ -59,14 +60,14 @@ void data_prepare(fft_param_t1* param)
 	    for (i0 = 0; i0 < param->n; ++i0)
 	    {
 	      index = i0 * is + i1 * ivs;
-	    	if (IN_RECV_RANGE(threadInfo.recv_data_range ,index))
+	    	if (IN_RECV_RANGE(dataInfo.recv_data_range ,index))
 	    	{
 	    	  // i0 * bufstride + i1 * 1
-	        recv[dataInfo.tmp_data_index].re = input[index].re; // bufstride 44(20)  is 50(25) ivs 1000(500)
-	        recv[dataInfo.tmp_data_index].im = input[index].im;
+	        recv[dataInfo.tmp_data_index].re = input[index - START_RECV_INDEX(dataInfo.recv_data_range)].re; // bufstride 44(20)  is 50(25) ivs 1000(500)
+	        recv[dataInfo.tmp_data_index].im = input[index - START_RECV_INDEX(dataInfo.recv_data_range)].im;
 	        ++dataInfo.tmp_data_index;
 	      }
-	      else if (OUT_RECV_RANGE(threadInfo.recv_data_range ,index))
+	      else if (OUT_RECV_RANGE(dataInfo.recv_data_range ,index))
 	      {
 	      	break;
 	      }
@@ -504,12 +505,16 @@ void cuco_recv_col_data()
 
 void init_data_exchange()
 {
-    dataInfo.recv_data_index = 0;
-    dataInfo.tmp_data_index = 0;
-    threadInfo.token = 0;
-    threadInfo.current_core = 0;
+  dataInfo.recv_data_index = 0;
+  dataInfo.tmp_data_index = 0;
+  threadInfo.token = 0;
+  threadInfo.current_core = 0;
 
-    // cal mode bat or single
+  dataInfo.recv_buffer = (FFT_TYPE *)ldm_malloc(MAX_PCORE_DATA*sizeof(FFT_TYPE));
+  dataInfo.input_buffer = (FFT_TYPE *)ldm_malloc(MAX_PCORE_DATA*sizeof(FFT_TYPE));
+  dataInfo.tmp_buffer = (FFT_TYPE *)ldm_malloc(MAX_PCORE_DATA*sizeof(FFT_TYPE) / 2);
+
+  // cal mode bat or single
 }
 
 void start_data_exchange()
@@ -517,6 +522,7 @@ void start_data_exchange()
   //use threadinfo to 
   threadInfo.token = 0;
   threadInfo.current_core = 0;
+  
   if (IS_BEGIN_CORE(threadInfo.range, threadInfo.logic_id))
   {
     // copy data to out

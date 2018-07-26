@@ -1,3 +1,6 @@
+#ifndef _SW_TYPE_H_
+#define _SW_TYPE_H_
+
 #define FFT_TYPE swfftfComplex
 #define FFT_NUM 256 
 #define FFT_DIS 64
@@ -44,8 +47,8 @@
 #define GET_HIGHER_8BITS(data) ((data & 0x0FF00) >> 8)
 #define GET_LOWER_8BITS(data) ((data & 0x0FF))
 
-#define SET_16BITS_PARAM(h,l) ((h & 0x0FF << 8) | (l & 0x0FF))
-#define SET_32BITS_PARAM(h,l) ((h & 0x0FFFF << 16) | (l & 0x0FFFF))
+#define SET_16BITS_PARAM(h,l) (((h & 0x0FF) << 8) | (l & 0x0FF))
+#define SET_32BITS_PARAM(h,l) (((h & 0x0FFFF) << 16) | (l & 0x0FFFF))
 
 #define CORE_ROW(index) (index >> 3)
 #define CORE_COL(index) (index & 0x07)
@@ -59,6 +62,7 @@
 
 #define IN_RECV_RANGE(recv_data_range, index) ((((recv_data_range & 0x0FFFF0000) >> 16) <= index) && (index <= (recv_data_range & 0x0FFFF)))
 #define OUT_RECV_RANGE(recv_data_range, index) (index > (recv_data_range & 0x0FFFF))
+#define START_RECV_INDEX(recv_data_range) ((recv_data_range & 0x0FFFF0000) >> 16)
 
 /* 寄存器间通信*/
 // 行发送
@@ -170,6 +174,8 @@ typedef struct
 
 typedef struct
 {
+	unsigned int	recv_data_rem;		// recieve data remainder
+	unsigned int	recv_data_range;	// high 16 bit start low 16 bit end
   unsigned short recv_data_index;    // recv buffer index
   unsigned short recv_buffer_size;   // recv buffer size
   unsigned short recv_data_len;      // recv data length per core
@@ -201,7 +207,6 @@ typedef struct
 	unsigned short group_id;        // group id(one core can restore 2000B data, so when N is bigger than 2000B. we divided N by multi-slave cores. this multi-slave cores are called a group)
 	unsigned short logic_id;        // when we use full core-array logic_id equal physical_id, but in common we divited cores into many groups, so logic_id is id in a group.
 	unsigned short physical_id;		  // thread_id
-	unsigned short core_rc_index;   // higher 8 bits column index lower 8 bits row index
 	unsigned short next_col_index;  // transfer token to next core higher 8 bits column index lower 8 bits row index(only column index  or row index valid, invalid index is 0)
 	unsigned short next_row_index;
 	unsigned short rows_comm_core;  // group contains two rows, this core show through which core to communicate in different rows
@@ -210,8 +215,6 @@ typedef struct
 	unsigned short range;           // show cores logic id from a to b in same row of a group. lower 8 bits begin, higher 8 bits end.
 	unsigned short token;
 	unsigned short core_state;      // core status.
-	unsigned int  recv_data_rem;    // recieve data remainder
-	unsigned int  recv_data_range;  // high 16 bit start low 16 bit end
 	unsigned char cores_in_group;   // cores in a group
 	unsigned char rows_in_group;    // group contains the number of core rows.
 	unsigned char current_row;      // row number in group.
@@ -220,4 +223,6 @@ typedef struct
 }threadinfo_t;
 
 typedef threadinfo_t THREADINFO;
+
+#endif
 
