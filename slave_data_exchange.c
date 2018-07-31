@@ -11,6 +11,7 @@ extern __thread_local DATAEXCHANGE_FUNC exchangeFunc;
 extern __thread_local FFT_MSG_PARAM fft_msg;
 extern __thread_local int thread_id;
 
+void init_core_state();
 void do_core_state_change();
 
 void data_prepare(fft_param_t1* param)
@@ -21,57 +22,74 @@ void data_prepare(fft_param_t1* param)
   unsigned short is = param->is;
   unsigned short ivs = param->ivs;
   unsigned short index = 0;
+  unsigned short index1 = 0;
+  unsigned short offset = 0;
+  unsigned short start_index = threadInfo.logic_id * 4;
+  unsigned short i = 0;
+  
 
-  FFT_TYPE *input = dataInfo.input_buffer + threadInfo.current_core * 1; // TODO: pay attension to shift value 1.
+  FFT_TYPE *input = dataInfo.input_buffer + threadInfo.current_core * 5; // TODO: pay attension to shift value 1.
+  offset = START_RECV_INDEX(dataInfo.input_data_range);
+  dataInfo.recv_data_index = 0;
 
-	if (threadInfo.logic_id == threadInfo.token)
+	if (threadInfo.logic_id == threadInfo.current_core)
 	{
 	  // copy data from input buffer to recv_buffer
 	  FFT_TYPE *recv = dataInfo.recv_buffer;
-	  
-	  for (i1 = 0; i1 < param->v1; ++i1)
+	  for (i = 0; i < 5; ++i)
 	  {
-	    for (i0 = 0; i0 < param->n; ++i0)
+	    dataInfo.recv_data_index = 0;
+	    for (i1 = start_index; i1 < param->v1; ++i1)
 	    {
-	      index = i0 * is + i1 * ivs;
-	    	if (IN_RECV_RANGE(dataInfo.recv_data_range ,index))
-	    	{
-	    	  // i0 * bufstride + i1 * 1
-	        recv[i1 * bufstride + i0 * 1].re = input[index].re; // bufstride 44(20)  is 50(25) ivs 1000(500)
-	        recv[i1 * bufstride + i0 * 1].im = input[index].im;
-	        ++dataInfo.recv_data_len;
-	      }
-	      else if (OUT_RECV_RANGE(dataInfo.recv_data_range ,index))
+	      for (i0 = 0; i0 < param->n; ++i0)
 	      {
-	      	break;
+	        index = i0 * is + i1 * ivs;
+	    	  if (IN_RECV_RANGE(dataInfo.input_data_range, index))
+	    	  {
+	    	    // i0 * bufstride + i1 * 1
+	    	    index1 = i1 * bufstride + i0 * 1;
+	          recv[index1].re = input[index - offset].re; // bufstride 44(20)  is 50(25) ivs 1000(500)
+	          recv[index1].im = input[index - offset].im;
+	          ++dataInfo.recv_data_len;
+	        }
+	        else if (OUT_RECV_RANGE(dataInfo.input_data_range, index))
+	        {
+	      	  break;
+	        }
 	      }
-
-	      ++dataInfo.recv_data_index;
 	    }
+	    recv += 400;
+	    ++input;
 	  }
+
+    dataInfo.recv_data_index = (threadInfo.current_core + 1) * 80;
 	}
 	else
 	{
 	  // copy data from input buffer to tmp buffer
 	  FFT_TYPE *recv = dataInfo.tmp_buffer;
-	  
-	  for (i1 = 0; i1 < param->v1; ++i1)
+	  dataInfo.tmp_data_index = 0;
+	  for (i = 0; i < 5; ++i)
 	  {
-	    for (i0 = 0; i0 < param->n; ++i0)
+	    for (i1 = start_index; i1 < param->v1; ++i1)
 	    {
-	      index = i0 * is + i1 * ivs;
-	    	if (IN_RECV_RANGE(dataInfo.recv_data_range ,index))
-	    	{
-	    	  // i0 * bufstride + i1 * 1
-	        recv[dataInfo.tmp_data_index].re = input[index - START_RECV_INDEX(dataInfo.recv_data_range)].re; // bufstride 44(20)  is 50(25) ivs 1000(500)
-	        recv[dataInfo.tmp_data_index].im = input[index - START_RECV_INDEX(dataInfo.recv_data_range)].im;
-	        ++dataInfo.tmp_data_index;
-	      }
-	      else if (OUT_RECV_RANGE(dataInfo.recv_data_range ,index))
+	      for (i0 = 0; i0 < param->n; ++i0)
 	      {
-	      	break;
+	        index = i0 * is + i1 * ivs;
+	    	  if (IN_RECV_RANGE(dataInfo.input_data_range, index))
+	    	  {
+	    	    // i0 * bufstride + i1 * 1
+	          recv[dataInfo.tmp_data_index].re = input[index - offset].re; // bufstride 44(20)  is 50(25) ivs 1000(500)
+	          recv[dataInfo.tmp_data_index].im = input[index - offset].im;
+	          ++dataInfo.tmp_data_index;
+	        }
+	        else if (OUT_RECV_RANGE(dataInfo.input_data_range ,index))
+	        {
+	      	  break;
+	        }
 	      }
 	    }
+	    ++input;
 	  }
 	}
 }
@@ -195,7 +213,7 @@ void n_recv_row_token()
 {
   unsigned short token;
   LONG_GETR(token);
-	
+
 	if (token != threadInfo.token)
 		threadInfo.token = token;
 
@@ -206,7 +224,7 @@ void n_recv_row_token()
 	  return;
 	}
 
-	if (IN_SOME_ROW(threadInfo.range, token))
+	if (IN_SAME_ROW(threadInfo.range, token))
   {
   	// send temp to token core
   	send_row_data(dataInfo.tmp_buffer, dataInfo.tmp_data_index, token);
@@ -226,12 +244,14 @@ void n_recv_row_token()
   }
   else
   {
-    threadInfo.state = RIGHT_ALLEND;    
+    threadInfo.state = RIGHT_ALLEND; 
   }
   
   // send token to next
   if (threadInfo.next_col_index != get_token_col_index(token))
+  {
     LONG_PUTR(token, threadInfo.next_col_index);
+  }
 }
 
 // current core
@@ -244,51 +264,69 @@ void cu_recv_row_token()
     
   threadInfo.state = RIGHT_RECVRDATA;
 
+  // send token to next
   LONG_PUTR(threadInfo.current_core, threadInfo.next_col_index);
 }
 
 // current core
 void cu_recv_row_data()
 {
-  int i;
+  int i,j,z;
   int length;
   int index;
-
+  FFT_TYPE* recv_buffer = dataInfo.recv_buffer;
+  length = 80;
   // get all cores data.
-  length = (threadInfo.cores_in_group - 1) * 80;
-
-  index = dataInfo.recv_data_index;
-  
-  for (i = 0; i < length; ++i)
+  for (j = 0; j < threadInfo.cores_in_group - 1; ++j)
   {
-    if (dataInfo.recv_buffer_size <= index)
+    recv_buffer = dataInfo.recv_buffer;
+    for (z = 0; z < 5 ; ++z)
     {
-      index = 0;
-    }
-    
-    LONG_GETR(dataInfo.recv_buffer[index].re);
-    LONG_GETR(dataInfo.recv_buffer[index].im);
+      index = dataInfo.recv_data_index;
+      for (i = 0; i < length; ++i)
+      {
+        if (400 <= index)
+        {
+          index = 0;
+        }
 
-    ++index;
+        LONG_GETR(recv_buffer[index].re);
+        LONG_GETR(recv_buffer[index].im);
+	
+      	++index;
+      }
+
+      recv_buffer += 400;
+      
+    }
+
+    dataInfo.recv_data_index = index;
     
-    // ×¢ÒâÑ­»·
   }
 
   dataInfo.recv_data_index = index;
 
-  dataInfo.recv_data_len += length;
+  dataInfo.recv_data_len += length * 5 * 4;
 
   ++threadInfo.current_core;
 
-  data_prepare(&fft_msg);
+  if (threadInfo.current_core < threadInfo.cores_in_group)
+  {
+    // prepare next core data to temp
+    data_prepare(&fft_msg);
+    
+    // send token
+    LONG_PUTR(threadInfo.current_core, threadInfo.next_col_index);
 
-  LONG_PUTR(threadInfo.current_core, threadInfo.next_col_index);
+    threadInfo.state = RIGHT_RECVRTOKEN;
 
-  threadInfo.state = RIGHT_RECVRTOKEN;
-
-  //change core state
-	do_core_state_change();
-
+    //change core state
+	  do_core_state_change();
+  }
+  else
+  {
+    threadInfo.state = RIGHT_ALLEND; 
+  }
 }
 
 // comm core (current core in local row and not comm core itself)
@@ -447,7 +485,7 @@ void cuco_recv_col_token()
     LONG_PUTC(token, threadInfo.next_col_index);
 
   // core state change
-  if (IN_SOME_ROW(threadInfo.range, threadInfo.current_core))
+  if (IN_SAME_ROW(threadInfo.range, threadInfo.current_core))
     do_core_state_change();
 }
 
@@ -497,7 +535,7 @@ void cuco_recv_col_data()
 	threadInfo.state = RIGHT_RECVRTOKEN;
 
 	// change core state change to co
-	if (IN_SOME_ROW(threadInfo.range, threadInfo.current_core))
+	if (IN_SAME_ROW(threadInfo.range, threadInfo.current_core))
     do_core_state_change();
 }
 
@@ -514,7 +552,12 @@ void init_data_exchange()
   dataInfo.input_buffer = (FFT_TYPE *)ldm_malloc(MAX_PCORE_DATA*sizeof(FFT_TYPE));
   dataInfo.tmp_buffer = (FFT_TYPE *)ldm_malloc(MAX_PCORE_DATA*sizeof(FFT_TYPE) / 2);
 
+  dataInfo.recv_buffer_size = MAX_PCORE_DATA;
+  dataInfo.input_buffer_size = MAX_PCORE_DATA;
+  dataInfo.tmp_buffer_size = MAX_PCORE_DATA / 2;
+
   // cal mode bat or single
+  init_core_state();
 }
 
 void start_data_exchange()
@@ -555,6 +598,47 @@ inline void end_data_exchange()
 {
   threadInfo.token = 0;
   threadInfo.current_core = 0;
+}
+
+void init_core_state()
+{
+  switch (threadInfo.core_state)
+  {
+    case CORE_STATE_N:
+    {
+      exchangeFunc.recv_rtoken_func = n_recv_row_token;
+      exchangeFunc.recv_rdata_func = NULL;
+      exchangeFunc.recv_ctoken_func = NULL;
+      exchangeFunc.recv_cdata_func = NULL;
+    }
+    break;
+    case CORE_STATE_CU:
+    {
+      exchangeFunc.recv_rtoken_func = cu_recv_row_token;
+      exchangeFunc.recv_rdata_func = cu_recv_row_data;
+      exchangeFunc.recv_ctoken_func = NULL;
+      exchangeFunc.recv_cdata_func = NULL;
+    }
+    break;
+    case  CORE_STATE_CO:
+    {
+      exchangeFunc.recv_rtoken_func = co_recv_row_token;
+      exchangeFunc.recv_rdata_func = NULL;
+      exchangeFunc.recv_ctoken_func = NULL;
+      exchangeFunc.recv_cdata_func = co_recv_col_data;
+    }
+    break;
+    case CORE_STATE_CUCO:
+    {
+      exchangeFunc.recv_rtoken_func = cuco_recv_row_token;
+      exchangeFunc.recv_rdata_func = cuco_recv_row_data;
+      exchangeFunc.recv_ctoken_func = cuco_recv_col_token;
+      exchangeFunc.recv_cdata_func = cuco_recv_col_data;
+    }
+    break;
+    default:
+    break;
+  }
 }
 
 void do_core_state_change()
@@ -604,9 +688,10 @@ void do_core_state_change()
 
 void do_data_exchange()
 {
-  while (1)
+  volatile int state = threadInfo.state;
+  while (RIGHT_ALLEND != state)
   {
-    switch (threadInfo.state)
+    switch (state)
     {
       case RIGHT_RECVRTOKEN:
       {
@@ -633,8 +718,10 @@ void do_data_exchange()
       }
       break;
       default:
-      break;
+      return;
     }
+
+    state = threadInfo.state;
   }
 }
 

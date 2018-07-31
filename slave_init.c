@@ -348,14 +348,14 @@ unsigned short init_threadinfo(int N)
 	if (0 == mod)
 	{
 	  cores_per_group = quo;
-	  dataInfo.recv_data_rem = 0;
-	  dataInfo.input_buffer_size = N / cores_per_group;
+	  dataInfo.input_data_rem = 0;
+	  dataInfo.input_data_len = N / cores_per_group;
 	}
 	else
 	{
 		cores_per_group = quo + 1;
 		mod1 = N % cores_per_group;
-		dataInfo.recv_data_rem = mod1;
+		dataInfo.input_data_rem = mod1;
 	}
 
 	// group id
@@ -373,25 +373,27 @@ unsigned short init_threadinfo(int N)
 	if ( 0 != mod)
 	{
 	  if ( 0 == threadInfo.logic_id)
-	  	dataInfo.input_buffer_size = N / cores_per_group + mod1;
+	  	dataInfo.input_data_len = N / cores_per_group + mod1;
 	  else
-	    dataInfo.input_buffer_size = N / cores_per_group;
+	    dataInfo.input_data_len = N / cores_per_group;
 	}
+
+	dataInfo.input_data_offset = threadInfo.logic_id * N / cores_per_group + mod1;
 
 	// recv_data_range
 	j = threadInfo.logic_id;
 	if (0  == j)
 	{
 	  start_recvdata_index = 0;
-	  end_recvdata_index = dataInfo.input_buffer_size - 1;
+	  end_recvdata_index = dataInfo.input_data_len - 1;
 	}
 	else
 	{
-	  start_recvdata_index = j * dataInfo.input_buffer_size + mod1;
-	  end_recvdata_index = (j + 1) * dataInfo.input_buffer_size + mod1 - 1;
+	  start_recvdata_index = j * dataInfo.input_data_len + mod1;
+	  end_recvdata_index = (j + 1) * dataInfo.input_data_len + mod1 - 1;
 	}
 
-	dataInfo.recv_data_range = SET_32BITS_PARAM(start_recvdata_index, end_recvdata_index);
+	dataInfo.input_data_range = SET_32BITS_PARAM(start_recvdata_index, end_recvdata_index);
 
 	if (1 == threadInfo.rows_in_group)
 	{
@@ -406,7 +408,7 @@ unsigned short init_threadinfo(int N)
 	}
 	else // multi rows
 	{
-	  if (IN_SOME_ROW(threadInfo.range, 0))
+	  if (IN_SAME_ROW(threadInfo.range, 0))
 	  {
 	    if (0 == threadInfo.logic_id)
 	    {

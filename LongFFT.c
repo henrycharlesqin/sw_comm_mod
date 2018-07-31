@@ -8,7 +8,7 @@
 #include <fcntl.h>
 #include "type.h"
 
-#define N 20000  // TODO 临时放在该处
+#define N 10000  // TODO 临时放在该处
 FFT_PARAM masterParam __attribute__((__aligned__(128)));
 FFT_TYPE W[] __attribute__((__aligned__(16))) =
 {
@@ -414,9 +414,6 @@ FFT_TYPE W[] __attribute__((__aligned__(16))) =
 {0.9687392,0.2480813},{0.9686612,0.2483856},{0.7302577,0.6831718},{0.7296135,0.6838598},{-0.6330567,0.7741055},{-0.6352429,0.7723124},{0.9647230,-0.2632669},{0.9666806,-0.2559857},
 };
 
-
-extern SLAVE_FUN(fft_func_init)(void* arg);
-extern SLAVE_FUN(fft_func_proc)(void* arg);
 extern SLAVE_FUN(fft_func_test)(void* arg);
 
 double rpcc()
@@ -428,14 +425,14 @@ double rpcc()
 
 void fft_process_init(void* step)
 {
-	athread_spawn64(slave_fft_func_init);
-	athread_join64();
+	//athread_spawn64(slave_fft_func_init);
+	//athread_join64();
 }
 
 void fft_process_normal(void* c)
 {
-	athread_spawn64(slave_fft_func_proc);
-	athread_join64();
+	//athread_spawn64(slave_fft_func_proc);
+	//athread_join64();
 }
 
 void fft_process_test(void* step)
@@ -444,17 +441,21 @@ void fft_process_test(void* step)
 	athread_join64();
 }
 
+FFT_TYPE *OutputBuf = NULL;
+FFT_TYPE *InputBuf = NULL;
+int Rows;
+
 int main(int argc, char *argv[])
 {
 	double st,ed;
 	int proc_id = 0;
 	int i = 0;
-	int ret = RET_ERR;
+	int ret = RET_OK;
 	char buffer[BUFFER_SIZE];
 	FILE* fp = NULL;
 	//malloc array
-	FFT_TYPE *OutputBuf = (FFT_TYPE *)malloc(N * sizeof(FFT_TYPE)); 
-	FFT_TYPE *InputBuf = (FFT_TYPE *)malloc(N * sizeof(FFT_TYPE));
+	OutputBuf = (FFT_TYPE *)malloc(N * sizeof(FFT_TYPE)); 
+	InputBuf = (FFT_TYPE *)malloc(N * sizeof(FFT_TYPE));
 	
 	if (1 == N)
 	{
@@ -470,6 +471,7 @@ int main(int argc, char *argv[])
 	}
 
 	// 数据初始化
+	Rows = 1;
 	for ( ; i < N; ++i)
 	{
 		InputBuf[i].re = i;
