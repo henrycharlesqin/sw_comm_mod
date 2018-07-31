@@ -74,7 +74,7 @@ void fft_func_test(void* param)
 	init_threadinfo(10000);
 
 
-	if (0 != threadInfo.group_id)
+	if (1 != threadInfo.group_id)
 	  return;
 
 	//if (0 != thread_id)
