@@ -214,6 +214,9 @@ void n_recv_row_token()
   unsigned short token;
   LONG_GETR(token);
 
+  //if (threadInfo.logic_id >= 3)
+    //printf("%d %d %d %d %d\n", threadInfo.logic_id, token, threadInfo.current_core, threadInfo.next_col_index, threadInfo.core_state);
+
 	if (token != threadInfo.token)
 		threadInfo.token = token;
 
@@ -248,18 +251,26 @@ void n_recv_row_token()
   }
   
   // send token to next
-  if (threadInfo.next_col_index != get_token_col_index(token))
+  // send token
+  if (IN_SAME_ROW(threadInfo.range, token))
   {
-    LONG_PUTR(token, threadInfo.next_col_index);
+    if (threadInfo.next_col_index != get_token_col_index(token))
+      LONG_PUTR(token, threadInfo.next_col_index);
   }
+  else
+  {
+    if (threadInfo.next_col_index != get_token_col_index(threadInfo.rows_comm_core))
+    {
+      LONG_PUTR(threadInfo.token, threadInfo.next_col_index);
+    }
+  }
+  
+  
 }
 
 // current core
 void cu_recv_row_token()
 {
-  //
-  printf("%d", threadInfo.logic_id);
-  
   threadInfo.state = RIGHT_RECVRDATA;
 
   // send token to next
@@ -275,6 +286,7 @@ void cu_recv_row_data()
   FFT_TYPE* recv_buffer = dataInfo.recv_buffer;
   length = 80;
   // get all cores data.
+   
   for (j = 0; j < threadInfo.cores_in_group - 1; ++j)
   {
     recv_buffer = dataInfo.recv_buffer;
@@ -333,10 +345,11 @@ void co_recv_row_token()
   unsigned short token;
   LONG_GETR(token);
 
+  //if (threadInfo.logic_id == 3)
+    //printf("c0 rrt%d %d %d %d %d\n", threadInfo.logic_id, token, threadInfo.current_core, threadInfo.next_col_index, threadInfo.core_state);
+
   if (token != threadInfo.token)
 		threadInfo.token = token;
-
-	printf("%d", token);
 
   // change state co->cuco
   if (token == threadInfo.logic_id)
@@ -353,6 +366,7 @@ void co_recv_row_token()
   threadInfo.state = RIGHT_RECVCDATA;
 }
 
+// current core is in the same row
 void co_recv_col_data()
 {
 	unsigned short token;
@@ -382,34 +396,36 @@ void co_recv_col_data()
   
     // send tmp data to current core
     send_row_data(dataInfo.tmp_buffer, index, token);
-    printf("%d", index);
 
     --j;
 
     index = 0;
   }
 
-  ++threadInfo.current_core;
+  ++threadInfo.current_core;  //TODO
 
-  data_prepare(&fft_msg);
+  if (threadInfo.current_core < threadInfo.cores_in_group)
+  {
+    data_prepare(&fft_msg);
+
+    if (threadInfo.next_col_index != get_token_col_index(token))
+      LONG_PUTR(threadInfo.token, threadInfo.next_col_index);
   
-  // send token
-  //LONG_PUTR(threadInfo.token, threadInfo.next_col_index); // TODO:
+    threadInfo.state = RIGHT_RECVRTOKEN;
+  }
+  else
+  {
+    threadInfo.state = RIGHT_ALLEND; 
+  }
 
-  threadInfo.state = RIGHT_RECVRTOKEN;
-
-  printf("f");
+  
 }
 
 // current and comm core or current core in other row 
 // first time recv token, co core -> current core.
 void cuco_recv_row_token()
 {
-  printf("%d", threadInfo.logic_id);
-	//++threadInfo.current_core;
 
-  //data_prepare(&dataInfo, &fft_param);
-    
   LONG_PUTR(threadInfo.current_core, threadInfo.next_col_index);
 
   threadInfo.state = RIGHT_RECVRDATA;
@@ -421,13 +437,14 @@ void cuco_recv_row_data()
   int length;
   int index;
 
-  // get local row all cores data.
+  // get local row all cores data.       
   length = (GET_ROW_CORES(threadInfo.range) - 1) * 80 * 5;
+
 
   if (threadInfo.logic_id == threadInfo.token)
   {
     index = dataInfo.recv_data_index;
-  
+        
     for (i = 0; i < length; ++i)
     {
       if (dataInfo.recv_buffer_size <= index)
@@ -439,9 +456,8 @@ void cuco_recv_row_data()
       LONG_GETR(dataInfo.recv_buffer[index].im);
 
       ++index;
-    
-     // 注意循环
     }
+     
     dataInfo.recv_data_index = index;
 
     dataInfo.recv_data_len += length * 5;
@@ -483,29 +499,41 @@ void cuco_recv_col_token()
   if (threadInfo.next_row_index != get_token_row_index(token))
     LONG_PUTC(token, threadInfo.next_col_index);
 
-	++threadInfo.current_core;
+	++threadInfo.current_core;
 
-  data_prepare(&fft_msg);
-
-  // send token to next core in some row
-  LONG_PUTR(threadInfo.current_core, threadInfo.next_col_index);
-
-  // core state change
-  if (IN_SAME_ROW(threadInfo.range, threadInfo.current_core))
+	if (threadInfo.current_core < threadInfo.cores_in_group)
   {
-    do_core_state_change();
-    threadInfo.state = RIGHT_RECVRTOKEN;
-    return;
-  }
 
-  threadInfo.state = RIGHT_RECVRDATA;
+	  threadInfo.token = threadInfo.current_core;
+
+    data_prepare(&fft_msg);
+
+    // send token to next core in some row
+    LONG_PUTR(threadInfo.current_core, threadInfo.next_col_index);
+
+    // core state change
+    if ((threadInfo.current_core != threadInfo.logic_id) && IN_SAME_ROW(threadInfo.range, threadInfo.current_core))
+    {
+      do_core_state_change();
+      threadInfo.state = RIGHT_RECVRTOKEN;
+      return;
+    }
+
+    threadInfo.state = RIGHT_RECVRDATA;
+  }
+  else
+  {
+    threadInfo.state = RIGHT_ALLEND; 
+  }
 }
 
 // only current core is comm core
+// not put in tmp_buffer,only recv row data may put into tmp_buffer.
 void cuco_recv_col_data()
 {
   unsigned short token;
 	int i,index,length,j;
+	FFT_TYPE *recv_buffer;
 	
 	token = threadInfo.token;
 	
@@ -513,7 +541,7 @@ void cuco_recv_col_data()
 	// get all cores data.
 	j = threadInfo.cores_in_group - GET_ROW_CORES(threadInfo.range);
 		
-	length =	80;
+	length =	80 * 5;
 	
 	index = dataInfo.recv_data_index;
 	
@@ -530,7 +558,6 @@ void cuco_recv_col_data()
 			LONG_GETC(dataInfo.recv_buffer[index].im);
 	
 			++index;			
-			// 注意循环
 		}
 		--j;
 
@@ -538,20 +565,31 @@ void cuco_recv_col_data()
 	}
 
 	++threadInfo.current_core;
-
-  data_prepare(&fft_msg);
+	
+  if (threadInfo.current_core < threadInfo.cores_in_group)
+  {
+    data_prepare(&fft_msg);
 		
-	// send token
-	LONG_PUTR(threadInfo.current_core, threadInfo.next_col_index);
+	  // send token
+	  LONG_PUTR(threadInfo.current_core, threadInfo.next_col_index);
 
-	threadInfo.state = RIGHT_RECVRTOKEN;
+	  threadInfo.token = threadInfo.current_core;
 
-	// change core state change to co
-	if (IN_SAME_ROW(threadInfo.range, threadInfo.current_core))
-    do_core_state_change();
+	  threadInfo.state = RIGHT_RECVRDATA;
+
+	  // change core state change to co
+	  if ((threadInfo.current_core != threadInfo.logic_id) && IN_SAME_ROW(threadInfo.range, threadInfo.current_core))
+	  {
+      do_core_state_change();
+      threadInfo.state = RIGHT_RECVRTOKEN;
+      return;
+    }
+  }
+  else
+  {
+    threadInfo.state = RIGHT_ALLEND; 
+  }
 }
-
-
 
 void init_data_exchange()
 {
@@ -655,6 +693,9 @@ void init_core_state()
 
 void do_core_state_change()
 {
+  //if (2 == threadInfo.logic_id)
+    //printf("%d %d->", threadInfo.logic_id, threadInfo.core_state);
+
   switch (threadInfo.core_state)
   {
     case CORE_STATE_N:
@@ -696,6 +737,10 @@ void do_core_state_change()
     default:
     break;
   }
+
+  //if (2 == threadInfo.logic_id)
+    //printf("%d %d\n", threadInfo.core_state, threadInfo.current_core);
+
 }
 
 void do_data_exchange()
