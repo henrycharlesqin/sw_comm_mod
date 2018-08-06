@@ -204,7 +204,7 @@ static void init_row_range()
 		threadInfo.logic_id = threadInfo.core_group_map[row_index][col_index];
 
 		// range
-		threadInfo.range = SET_16BITS_PARAM(end, begin);
+		threadInfo.range = SET_16BITS_PARAM(end, begin); // if same end and begin is same
 
 		// next core
 		threadInfo.next_col_index = 0x0FF;
@@ -326,6 +326,70 @@ static void init_row_range()
 		  threadInfo.next_col_index = 0x0FF;
 }
 
+void init_core_recvsquence()
+{
+  int j;
+  unsigned short begin;
+  unsigned short end;
+  unsigned short v;
+
+  j = 0;
+  begin = BEGIN_CORE_AROW(threadInfo.range);
+  end = END_CORE_AROW(threadInfo.range);
+  v = threadInfo.logic_id + 1;
+
+  // local row
+  if (begin != end)
+  {
+    while (v != threadInfo.logic_id)
+    {
+      if (end < v)
+      {
+        if (begin == threadInfo.logic_id)
+          break;
+          
+        v = begin;
+        dataInfo.recv_core_seq[j] = (unsigned char)v;
+      }
+      else
+      {
+        dataInfo.recv_core_seq[j] = (unsigned char)v;
+      }
+
+      ++j;
+
+      if (threadInfo.rows_comm_core == (unsigned short)v)
+			{
+				break;
+			}
+			
+      ++v;
+    }
+  }
+
+  // next row
+  v = end + 1;
+  while (v < threadInfo.cores_in_group)
+  {
+    dataInfo.recv_core_seq[j] = (unsigned char)v;
+    ++j;
+    ++v;
+  }
+
+  // prev row
+  v = 0;
+  while (j < threadInfo.cores_in_group - 1)
+  {
+    dataInfo.recv_core_seq[j] = (unsigned char)v;
+    ++v;
+
+    if (threadInfo.rows_comm_core == (unsigned short)v)
+	    ++v;
+		
+    ++j;
+  }
+}
+
 unsigned short init_threadinfo(int N)
 {
 	// cal multi-core read N/n
@@ -369,7 +433,6 @@ unsigned short init_threadinfo(int N)
 	// range
 	init_row_range();
 
-	
 	if ( 0 != mod)
 	{
 	  if ( 0 == threadInfo.logic_id)
@@ -395,6 +458,7 @@ unsigned short init_threadinfo(int N)
 
 	dataInfo.input_data_range = SET_32BITS_PARAM(start_recvdata_index, end_recvdata_index);
 
+  // init core state
 	if (1 == threadInfo.rows_in_group)
 	{
 	  if (0 == threadInfo.logic_id)
@@ -445,9 +509,12 @@ unsigned short init_threadinfo(int N)
 	    }
 	  }
 	}
+
+	// init core recv sequence
+	init_core_recvsquence();
 	
 	return RET_OK;
-	}
+}
 
 
 

@@ -190,6 +190,7 @@ typedef struct
   FFT_TYPE *recv_buffer;             // recv buffer start address
   FFT_TYPE *current_recv_buffer;     // recv buffer current address
   FFT_TYPE *tmp_buffer;              // temp buffer address
+  unsigned char recv_core_seq[CORE_NUM];    // recv the other core data sequence
 }dataexchange_info_t;
 
 typedef void (*data_prepare_ptr)(dataexchange_info_t*, fft_param_t1*);

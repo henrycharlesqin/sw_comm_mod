@@ -208,6 +208,7 @@ void send_column_data(FFT_TYPE* buffer, unsigned short length, unsigned short de
   	
 }
 
+
 // normal core
 void n_recv_row_token()
 {
@@ -280,38 +281,38 @@ void cu_recv_row_token()
 // current core
 void cu_recv_row_data()
 {
-  int i,j,z;
+  int i,j,z,k;
   int length;
   int index;
+  int index1;
   FFT_TYPE* recv_buffer = dataInfo.recv_buffer;
   length = 80;
   // get all cores data.
-   
+
+  // TODO one row two rows  three row procedure is different
   for (j = 0; j < threadInfo.cores_in_group - 1; ++j)
   {
     recv_buffer = dataInfo.recv_buffer;
+    index1 = (int)dataInfo.recv_core_seq[j];
     for (z = 0; z < 5 ; ++z)
     {
-      index = dataInfo.recv_data_index;
+      index = index1 * 80;
       for (i = 0; i < length; ++i)
       {
-        if (400 <= index)
-        {
-          index = 0;
-        }
+        //if (400 <= index)
+        //{
+        //  index = 0;
+        //}
 
         LONG_GETR(recv_buffer[index].re);
         LONG_GETR(recv_buffer[index].im);
 	
       	++index;
-      }
-      
-      recv_buffer += 400;
-      
+      }      
+      recv_buffer += 400;  
     }
 
     dataInfo.recv_data_index = index;
-    
   }
 
   dataInfo.recv_data_index = index;
@@ -402,23 +403,21 @@ void co_recv_col_data()
     index = 0;
   }
 
+  if (threadInfo.next_col_index != get_token_col_index(token))
+      LONG_PUTR(threadInfo.token, threadInfo.next_col_index);
+
   ++threadInfo.current_core;  //TODO
 
   if (threadInfo.current_core < threadInfo.cores_in_group)
   {
     data_prepare(&fft_msg);
 
-    if (threadInfo.next_col_index != get_token_col_index(token))
-      LONG_PUTR(threadInfo.token, threadInfo.next_col_index);
-  
     threadInfo.state = RIGHT_RECVRTOKEN;
   }
   else
   {
     threadInfo.state = RIGHT_ALLEND; 
   }
-
-  
 }
 
 // current and comm core or current core in other row 
@@ -433,34 +432,50 @@ void cuco_recv_row_token()
 
 void cuco_recv_row_data()
 {
-  int i;
+  int i,j,z;
   int length;
   int index;
+  int index1;
+  int index2;
+  FFT_TYPE* recv_buffer;
 
   // get local row all cores data.       
-  length = (GET_ROW_CORES(threadInfo.range) - 1) * 80 * 5;
-
+  index1 = GET_ROW_CORES(threadInfo.range) - 1;
 
   if (threadInfo.logic_id == threadInfo.token)
   {
-    index = dataInfo.recv_data_index;
-        
-    for (i = 0; i < length; ++i)
+    length = 80;
+
+    if (IS_END_CORE(threadInfo.range, threadInfo.logic_id))
+      index2 = dataInfo.recv_data_index - GET_ROW_CORES(threadInfo.range) * 80; // not safe
+    else
+      index2 = dataInfo.recv_data_index;
+
+    for (j = 0; j < index1; ++j)
     {
-      if (dataInfo.recv_buffer_size <= index)
+      recv_buffer = dataInfo.recv_buffer;
+      for (z = 0; z < 5; ++z)
       {
-        index = 0;
+        //index = dataInfo.recv_data_index;
+        index = index2; //TODO(local row begin offset)
+        for (i = 0; i < length; ++i)
+        {
+          LONG_GETR(recv_buffer[index].re);
+          LONG_GETR(recv_buffer[index].im);
+
+          ++index;
+        }
+
+        recv_buffer += 400;
       }
-    
-      LONG_GETR(dataInfo.recv_buffer[index].re);
-      LONG_GETR(dataInfo.recv_buffer[index].im);
 
-      ++index;
+      index2 += length;
     }
-     
-    dataInfo.recv_data_index = index;
 
-    dataInfo.recv_data_len += length * 5;
+    if (!IS_END_CORE(threadInfo.range, threadInfo.logic_id))
+      dataInfo.recv_data_index = index;
+    
+    dataInfo.recv_data_len += length * 5 * index1;
 
     LONG_PUTC(threadInfo.token, threadInfo.next_row_index); // col token
 
@@ -468,6 +483,7 @@ void cuco_recv_row_data()
   }
   else
   {
+    length = (GET_ROW_CORES(threadInfo.range) - 1) * 80 * 5;
     index = dataInfo.tmp_data_index;
 
     for (i = 0; i < length; ++i)
@@ -493,7 +509,16 @@ void cuco_recv_col_token()
 	if (threadInfo.token != token)
 	  threadInfo.token = token;
 
-	send_column_data(dataInfo.tmp_buffer, dataInfo.tmp_data_index, token);
+	if (IS_BEGIN_CORE(threadInfo.range, threadInfo.logic_id) || (400 >= dataInfo.tmp_data_index))
+	{
+	  send_column_data(dataInfo.tmp_buffer, dataInfo.tmp_data_index, token);
+	}
+	else
+	{
+	  send_column_data(dataInfo.tmp_buffer + 400, dataInfo.tmp_data_index - 400, token);
+
+	  send_column_data(dataInfo.tmp_buffer, 400, token);
+	}
 
 	// if next row core is not token, send column token.
   if (threadInfo.next_row_index != get_token_row_index(token))
@@ -532,7 +557,7 @@ void cuco_recv_col_token()
 void cuco_recv_col_data()
 {
   unsigned short token;
-	int i,index,length,j;
+	int i,index,length,j,z;
 	FFT_TYPE *recv_buffer;
 	
 	token = threadInfo.token;
@@ -541,27 +566,36 @@ void cuco_recv_col_data()
 	// get all cores data.
 	j = threadInfo.cores_in_group - GET_ROW_CORES(threadInfo.range);
 		
-	length =	80 * 5;
+	length =	80;
 	
 	index = dataInfo.recv_data_index;
 	
 	while (0 < j)
 	{
-		for (i = 0; i < length; ++i)
-		{ 
-		  if (dataInfo.recv_buffer_size <= index)
-      {
-        index = 0;
-      }
-      
-			LONG_GETC(dataInfo.recv_buffer[index].re);
-			LONG_GETC(dataInfo.recv_buffer[index].im);
+	  recv_buffer = dataInfo.recv_buffer;
+	  for (z = 0; z < 5; ++z)
+	  {
+	    index = dataInfo.recv_data_index;
+		  for (i = 0; i < length; ++i)
+		  { 
+		    if (400 <= index)
+        {
+          index = 0;
+        }
+       
+			  LONG_GETC(recv_buffer[index].re);
+			  LONG_GETC(recv_buffer[index].im);
 	
-			++index;			
+			  ++index;			
+		  }
+
+		  recv_buffer += 400;
 		}
 		--j;
 
-		dataInfo.recv_data_len += index;
+		dataInfo.recv_data_index = index;
+
+		dataInfo.recv_data_len += 80 * 5;
 	}
 
 	++threadInfo.current_core;

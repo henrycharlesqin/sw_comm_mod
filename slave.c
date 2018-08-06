@@ -39,7 +39,7 @@ extern int Rows;
 
 void input_origin_data()
 {
-  if (threadInfo.group_id >= 1)
+  if (threadInfo.group_id != 1)
     return;
   
   athread_get(PE_MODE, (void*)(InputBuf + dataInfo.input_data_offset), (void*)dataInfo.input_buffer, dataInfo.input_data_len * sizeof(FFT_TYPE), (void *)&get_reply, 0, 0, 0);
@@ -50,7 +50,7 @@ void input_origin_data()
 
 void output_results()
 {
-  if (threadInfo.group_id >= 1)
+  if (threadInfo.group_id != 1)
     return;
   
   athread_put(PE_MODE, (void*)dataInfo.recv_buffer, (void*)(OutputBuf + dataInfo.input_data_offset), dataInfo.input_data_len * sizeof(FFT_TYPE), (void *)&put_reply, 0, 0);
@@ -74,7 +74,7 @@ void fft_func_test(void* param)
 	init_threadinfo(10000);
 
 
-	if (0 != threadInfo.group_id)
+	if (1 != threadInfo.group_id)
 	  return;
 
 	//if (0 != thread_id)
