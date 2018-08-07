@@ -2,6 +2,7 @@
 #include "slave.h"
 #include "dma.h"
 #include "ldm_malloc.h"
+#include "simd.h"
 #include "type.h"
 
 extern __thread_local FFT_PARAM slaveParam;
@@ -26,11 +27,9 @@ void data_prepare(fft_param_t1* param)
   unsigned short offset = 0;
   unsigned short start_index = threadInfo.logic_id * 4;
   unsigned short i = 0;
-  
-
+ 
   FFT_TYPE *input = dataInfo.input_buffer + threadInfo.current_core * 5; // TODO: pay attension to shift value 1.
   offset = START_RECV_INDEX(dataInfo.input_data_range);
-  dataInfo.recv_data_index = 0;
 
 	if (threadInfo.logic_id == threadInfo.current_core)
 	{
@@ -38,7 +37,6 @@ void data_prepare(fft_param_t1* param)
 	  FFT_TYPE *recv = dataInfo.recv_buffer;
 	  for (i = 0; i < 5; ++i)
 	  {
-	    dataInfo.recv_data_index = 0;
 	    for (i1 = start_index; i1 < param->v1; ++i1)
 	    {
 	      for (i0 = 0; i0 < param->n; ++i0)
@@ -112,10 +110,9 @@ void send_row_data(FFT_TYPE* buffer, unsigned short length, unsigned short des)
 		col_index = CORE_COL(threadInfo.physical_id) + dis;
 	}	
 
-	for (i = 0; i < length; ++i)
+	for (i = 0; i < length; i = i + 2)
 	{
-		LONG_PUTR(buffer[i].re, col_index);
-		LONG_PUTR(buffer[i].im, col_index);
+		LONG_PUTR(simd_set_floatv4(buffer[i].re,buffer[i].im,buffer[i+1].re,buffer[i+1].im), col_index);
 	}
 }
 
@@ -200,10 +197,9 @@ void send_column_data(FFT_TYPE* buffer, unsigned short length, unsigned short de
 
   row_index = CORE_ROW(threadInfo.physical_id) + dis;
 
-  for (i = 0; i < length; ++i)
+  for (i = 0; i < length; i = i + 2)
   {
-    LONG_PUTC(buffer[i].re, row_index);
-    LONG_PUTC(buffer[i].im, row_index);
+    LONG_PUTC(simd_set_floatv4(buffer[i].re,buffer[i].im,buffer[i+1].re,buffer[i+1].im), row_index);
   }
   	
 }
@@ -214,9 +210,6 @@ void n_recv_row_token()
 {
   unsigned short token;
   LONG_GETR(token);
-
-  //if (threadInfo.logic_id >= 3)
-    //printf("%d %d %d %d %d\n", threadInfo.logic_id, token, threadInfo.current_core, threadInfo.next_col_index, threadInfo.core_state);
 
 	if (token != threadInfo.token)
 		threadInfo.token = token;
@@ -252,7 +245,6 @@ void n_recv_row_token()
   }
   
   // send token to next
-  // send token
   if (IN_SAME_ROW(threadInfo.range, token))
   {
     if (threadInfo.next_col_index != get_token_col_index(token))
@@ -261,9 +253,7 @@ void n_recv_row_token()
   else
   {
     if (threadInfo.next_col_index != get_token_col_index(threadInfo.rows_comm_core))
-    {
       LONG_PUTR(threadInfo.token, threadInfo.next_col_index);
-    }
   }
   
   
@@ -285,7 +275,9 @@ void cu_recv_row_data()
   int length;
   int index;
   int index1;
+  floatv4 data;
   FFT_TYPE* recv_buffer = dataInfo.recv_buffer;
+  
   length = 80;
   // get all cores data.
 
@@ -297,26 +289,17 @@ void cu_recv_row_data()
     for (z = 0; z < 5 ; ++z)
     {
       index = index1 * 80;
-      for (i = 0; i < length; ++i)
+      for (i = 0; i < length / 2; ++i)
       {
-        //if (400 <= index)
-        //{
-        //  index = 0;
-        //}
-
-        LONG_GETR(recv_buffer[index].re);
-        LONG_GETR(recv_buffer[index].im);
+        LONG_GETR(data);
+        simd_store(data, (float*)&recv_buffer[index]);
 	
-      	++index;
+      	index += 2;;
       }      
       recv_buffer += 400;  
     }
-
-    dataInfo.recv_data_index = index;
   }
-
-  dataInfo.recv_data_index = index;
-
+  
   dataInfo.recv_data_len += length * 5 * 4;
 
   ++threadInfo.current_core;
@@ -346,9 +329,6 @@ void co_recv_row_token()
   unsigned short token;
   LONG_GETR(token);
 
-  //if (threadInfo.logic_id == 3)
-    //printf("c0 rrt%d %d %d %d %d\n", threadInfo.logic_id, token, threadInfo.current_core, threadInfo.next_col_index, threadInfo.core_state);
-
   if (token != threadInfo.token)
 		threadInfo.token = token;
 
@@ -372,6 +352,7 @@ void co_recv_col_data()
 {
 	unsigned short token;
 	int i,index,length,j;
+	floatv4 data;
 
 	token = threadInfo.token;
 
@@ -385,14 +366,13 @@ void co_recv_col_data()
 
   while (0 < j)
   {
-    for (i = 0; i < length; ++i)
+    for (i = 0; i < length / 2; ++i)
     { 
-      LONG_GETC(dataInfo.tmp_buffer[index].re);
-      LONG_GETC(dataInfo.tmp_buffer[index].im);
+      LONG_GETC(data);
+      simd_store(data, (float*)&dataInfo.tmp_buffer[index]);
 
-      ++index;
-    
-      // ×¢ÒâÑ­»·
+      index += 2;
+   
     }
   
     // send tmp data to current core
@@ -406,7 +386,7 @@ void co_recv_col_data()
   if (threadInfo.next_col_index != get_token_col_index(token))
       LONG_PUTR(threadInfo.token, threadInfo.next_col_index);
 
-  ++threadInfo.current_core;  //TODO
+  ++threadInfo.current_core;
 
   if (threadInfo.current_core < threadInfo.cores_in_group)
   {
@@ -438,6 +418,7 @@ void cuco_recv_row_data()
   int index1;
   int index2;
   FFT_TYPE* recv_buffer;
+  floatv4 data;
 
   // get local row all cores data.       
   index1 = GET_ROW_CORES(threadInfo.range) - 1;
@@ -446,35 +427,25 @@ void cuco_recv_row_data()
   {
     length = 80;
 
-    if (IS_END_CORE(threadInfo.range, threadInfo.logic_id))
-      index2 = dataInfo.recv_data_index - GET_ROW_CORES(threadInfo.range) * 80; // not safe
-    else
-      index2 = dataInfo.recv_data_index;
-
     for (j = 0; j < index1; ++j)
     {
       recv_buffer = dataInfo.recv_buffer;
+      index2 = dataInfo.recv_core_seq[j];
       for (z = 0; z < 5; ++z)
       {
-        //index = dataInfo.recv_data_index;
-        index = index2; //TODO(local row begin offset)
-        for (i = 0; i < length; ++i)
+        index = index2 * 80; //(local row begin offset)
+        for (i = 0; i < length / 2; ++i)
         {
-          LONG_GETR(recv_buffer[index].re);
-          LONG_GETR(recv_buffer[index].im);
+          LONG_GETR(data);
+          simd_store(data, (float*)&recv_buffer[index]);
 
-          ++index;
+          index += 2;
         }
 
         recv_buffer += 400;
       }
-
-      index2 += length;
     }
 
-    if (!IS_END_CORE(threadInfo.range, threadInfo.logic_id))
-      dataInfo.recv_data_index = index;
-    
     dataInfo.recv_data_len += length * 5 * index1;
 
     LONG_PUTC(threadInfo.token, threadInfo.next_row_index); // col token
@@ -483,15 +454,15 @@ void cuco_recv_row_data()
   }
   else
   {
-    length = (GET_ROW_CORES(threadInfo.range) - 1) * 80 * 5;
+    length = index1 * 80 * 5;
     index = dataInfo.tmp_data_index;
 
-    for (i = 0; i < length; ++i)
+    for (i = 0; i < length / 2; ++i)
     {
-      LONG_GETR(dataInfo.tmp_buffer[index].re);
-      LONG_GETR(dataInfo.tmp_buffer[index].im);
+      LONG_GETR(data);
+      simd_store(data, (float*)&dataInfo.tmp_buffer[index]);
 
-      ++index;
+      index += 2;
     }
 
     dataInfo.tmp_data_index = index;
@@ -557,44 +528,35 @@ void cuco_recv_col_token()
 void cuco_recv_col_data()
 {
   unsigned short token;
-	int i,index,length,j,z;
+	int i,index,index1,length,j,z;
 	FFT_TYPE *recv_buffer;
+	floatv4 data;
 	
 	token = threadInfo.token;
 	
 	// recv all other row data.
 	// get all cores data.
-	j = threadInfo.cores_in_group - GET_ROW_CORES(threadInfo.range);
+	j = GET_ROW_CORES(threadInfo.range) - 1;
 		
 	length =	80;
 	
-	index = dataInfo.recv_data_index;
-	
-	while (0 < j)
+	for (; j < threadInfo.cores_in_group - 1; ++j)
 	{
 	  recv_buffer = dataInfo.recv_buffer;
+	  index1 = dataInfo.recv_core_seq[j];
 	  for (z = 0; z < 5; ++z)
 	  {
-	    index = dataInfo.recv_data_index;
-		  for (i = 0; i < length; ++i)
+	    index = index1 * 80;
+		  for (i = 0; i < length / 2; ++i)
 		  { 
-		    if (400 <= index)
-        {
-          index = 0;
-        }
-       
-			  LONG_GETC(recv_buffer[index].re);
-			  LONG_GETC(recv_buffer[index].im);
-	
-			  ++index;			
+			  LONG_GETC(data);
+	      simd_store(data, (float*)&recv_buffer[index]);
+			  index += 2;			
 		  }
 
 		  recv_buffer += 400;
 		}
-		--j;
-
-		dataInfo.recv_data_index = index;
-
+		
 		dataInfo.recv_data_len += 80 * 5;
 	}
 
