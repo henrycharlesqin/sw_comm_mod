@@ -154,6 +154,9 @@ typedef struct
   unsigned short v1;
   unsigned short is;
   unsigned short bufstride;
+  unsigned short length;
+  unsigned short parts;
+  unsigned short step;
 } fft_param_t1;
 
 typedef fft_param_t1 FFT_MSG_PARAM;
@@ -193,10 +196,11 @@ typedef struct
   unsigned char recv_core_seq[CORE_NUM];    // recv the other core data sequence
 }dataexchange_info_t;
 
-typedef void (*data_prepare_ptr)(dataexchange_info_t*, fft_param_t1*);
+typedef void (*data_prepare_ptr)(fft_param_t1*);
 typedef void (*data_send_ptr)(dataexchange_info_t*, fft_param_t1*);
 typedef void (*data_recv_ptr)(dataexchange_info_t*, fft_param_t1*);
 
+typedef data_prepare_ptr DATAEXCHANGE_PREPARE_FUNC;
 typedef dataexchange_info_t DATAEXCHANGE_INFO;
 typedef dataexchange_func_t DATAEXCHANGE_FUNC;
 
@@ -217,6 +221,7 @@ typedef struct
 	unsigned short range;           // show cores logic id from a to b in same row of a group. lower 8 bits begin, higher 8 bits end.
 	unsigned short token;
 	unsigned short core_state;      // core status.
+	unsigned short origin_state;    //
 	unsigned char cores_in_group;   // cores in a group
 	unsigned char rows_in_group;    // group contains the number of core rows.
 	unsigned char current_row;      // row number in group.

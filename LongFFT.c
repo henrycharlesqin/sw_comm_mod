@@ -414,7 +414,9 @@ FFT_TYPE W[] __attribute__((__aligned__(16))) =
 {0.9687392,0.2480813},{0.9686612,0.2483856},{0.7302577,0.6831718},{0.7296135,0.6838598},{-0.6330567,0.7741055},{-0.6352429,0.7723124},{0.9647230,-0.2632669},{0.9666806,-0.2559857},
 };
 
+extern SLAVE_FUN(fft_func_test0)(void* arg);
 extern SLAVE_FUN(fft_func_test)(void* arg);
+extern SLAVE_FUN(fft_func_test1)(void* arg);
 
 double rpcc()
 {
@@ -438,6 +440,10 @@ void fft_process_normal(void* c)
 void fft_process_test(void* step)
 {
 	athread_spawn64(slave_fft_func_test,(void*) step);
+	athread_join64();
+	athread_spawn64(slave_fft_func_test0,(void*) step);
+	athread_join64();
+	athread_spawn64(slave_fft_func_test1,(void*) step);
 	athread_join64();
 }
 

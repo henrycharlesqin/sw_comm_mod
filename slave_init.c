@@ -510,6 +510,8 @@ unsigned short init_threadinfo(int N)
 	  }
 	}
 
+	threadInfo.origin_state = threadInfo.core_state;
+
 	// init core recv sequence
 	init_core_recvsquence();
 	

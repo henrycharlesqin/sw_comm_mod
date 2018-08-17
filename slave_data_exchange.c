@@ -9,11 +9,64 @@ extern __thread_local FFT_PARAM slaveParam;
 extern __thread_local THREADINFO threadInfo;
 extern __thread_local DATAEXCHANGE_INFO dataInfo;
 extern __thread_local DATAEXCHANGE_FUNC exchangeFunc;
+extern __thread_local DATAEXCHANGE_PREPARE_FUNC prepareFunc;
 extern __thread_local FFT_MSG_PARAM fft_msg;
 extern __thread_local int thread_id;
 
 void init_core_state();
 void do_core_state_change();
+void data_prepare1(fft_param_t1* param)
+{
+  int start_index = threadInfo.logic_id * 10;
+  int start_index1 = threadInfo.current_core * 80;
+  int i,j,z;
+  int index;
+  int index1;
+
+  if (threadInfo.logic_id != threadInfo.current_core)
+  {
+    FFT_TYPE *recv = dataInfo.tmp_buffer;
+    dataInfo.tmp_data_index = 0;
+    index = 0;
+    for (z = 0; z < 5; ++z)
+    {
+      j = 0;
+      for (i = 0; i < 40; ++i)
+      {
+        index = 10 * i + z * 2;
+        index1 = 400 * z + j + start_index1;
+        recv[index].re = dataInfo.input_buffer[index1].re;
+        recv[index].im = dataInfo.input_buffer[index1].im;
+				recv[index + 1].re = dataInfo.input_buffer[index1 + 1].re;
+				recv[index + 1].im = dataInfo.input_buffer[index1 + 1].im;
+
+				j += 2;
+				index += 2;
+				dataInfo.tmp_data_index += 2;
+      }
+    }
+  }
+  else
+  {
+    FFT_TYPE *recv = dataInfo.recv_buffer;
+		for (z = 0; z < 5; ++z)
+		{
+			j = 0;
+			for (i = 0; i < 40; ++i)
+			{
+				index = 50 * i + z * 2 + start_index;
+				index1 = 400 * z + j + start_index1;
+
+				recv[index].re = dataInfo.input_buffer[index1].re;
+				recv[index].im = dataInfo.input_buffer[index1].im;
+				recv[index + 1].re = dataInfo.input_buffer[index1 + 1].re;
+				recv[index + 1].im = dataInfo.input_buffer[index1 + 1].im;
+
+				j += 2;
+			}
+		}
+  }
+}
 
 void data_prepare(fft_param_t1* param)
 {
@@ -234,16 +287,6 @@ void n_recv_row_token()
 
   ++threadInfo.current_core;
 
-  if (threadInfo.current_core < threadInfo.cores_in_group)
-  {
-    // prepare next core data to temp
-    data_prepare(&fft_msg);
-  }
-  else
-  {
-    threadInfo.state = RIGHT_ALLEND; 
-  }
-  
   // send token to next
   if (IN_SAME_ROW(threadInfo.range, token))
   {
@@ -255,8 +298,16 @@ void n_recv_row_token()
     if (threadInfo.next_col_index != get_token_col_index(threadInfo.rows_comm_core))
       LONG_PUTR(threadInfo.token, threadInfo.next_col_index);
   }
-  
-  
+
+  if (threadInfo.current_core < threadInfo.cores_in_group)
+  {
+    // prepare next core data to temp
+    prepareFunc(&fft_msg);
+  }
+  else
+  {
+    threadInfo.state = RIGHT_ALLEND; 
+  } 
 }
 
 // current core
@@ -278,40 +329,40 @@ void cu_recv_row_data()
   floatv4 data;
   FFT_TYPE* recv_buffer = dataInfo.recv_buffer;
   
-  length = 80;
+  length = fft_msg.length;
   // get all cores data.
 
   // TODO one row two rows  three row procedure is different
   for (j = 0; j < threadInfo.cores_in_group - 1; ++j)
   {
     recv_buffer = dataInfo.recv_buffer;
-    index1 = (int)dataInfo.recv_core_seq[j];
-    for (z = 0; z < 5 ; ++z)
+    index1 = dataInfo.recv_core_seq[j];
+    for (z = 0; z < fft_msg.parts; ++z)
     {
-      index = index1 * 80;
+      index = index1 * length;
       for (i = 0; i < length / 2; ++i)
       {
         LONG_GETR(data);
         simd_store(data, (float*)&recv_buffer[index]);
 	
-      	index += 2;;
+      	index += 2;
       }      
-      recv_buffer += 400;  
+      recv_buffer += fft_msg.step;  
     }
   }
   
-  dataInfo.recv_data_len += length * 5 * 4;
+  //dataInfo.recv_data_len += length * 5 * 4;
 
   ++threadInfo.current_core;
 
   if (threadInfo.current_core < threadInfo.cores_in_group)
   {
-    // prepare next core data to temp
-    data_prepare(&fft_msg);
-    
-    // send token
+  	// send token
     LONG_PUTR(threadInfo.current_core, threadInfo.next_col_index);
-
+    
+    // prepare next core data to temp
+    prepareFunc(&fft_msg);
+    
     threadInfo.state = RIGHT_RECVRTOKEN;
 
     //change core state
@@ -390,7 +441,7 @@ void co_recv_col_data()
 
   if (threadInfo.current_core < threadInfo.cores_in_group)
   {
-    data_prepare(&fft_msg);
+    prepareFunc(&fft_msg);
 
     threadInfo.state = RIGHT_RECVRTOKEN;
   }
@@ -499,13 +550,12 @@ void cuco_recv_col_token()
 
 	if (threadInfo.current_core < threadInfo.cores_in_group)
   {
+    // send token to next core in some row
+    LONG_PUTR(threadInfo.current_core, threadInfo.next_col_index);
 
 	  threadInfo.token = threadInfo.current_core;
 
-    data_prepare(&fft_msg);
-
-    // send token to next core in some row
-    LONG_PUTR(threadInfo.current_core, threadInfo.next_col_index);
+    prepareFunc(&fft_msg);
 
     // core state change
     if ((threadInfo.current_core != threadInfo.logic_id) && IN_SAME_ROW(threadInfo.range, threadInfo.current_core))
@@ -564,11 +614,11 @@ void cuco_recv_col_data()
 	
   if (threadInfo.current_core < threadInfo.cores_in_group)
   {
-    data_prepare(&fft_msg);
-		
-	  // send token
+    // send token
 	  LONG_PUTR(threadInfo.current_core, threadInfo.next_col_index);
-
+	  
+    prepareFunc(&fft_msg);
+		
 	  threadInfo.token = threadInfo.current_core;
 
 	  threadInfo.state = RIGHT_RECVRDATA;
@@ -611,11 +661,12 @@ void start_data_exchange()
   //use threadinfo to 
   threadInfo.token = 0;
   threadInfo.current_core = 0;
+  prepareFunc = data_prepare;
   
   if (IS_BEGIN_CORE(threadInfo.range, threadInfo.logic_id))
   {
     // copy data to out
-    data_prepare(&fft_msg);
+    prepareFunc(&fft_msg);
 
     if (!IS_SINGLE_CORE(threadInfo.next_col_index))
     {
@@ -631,7 +682,7 @@ void start_data_exchange()
   else
   {
     // copy data to temp
-    data_prepare(&fft_msg);
+    prepareFunc(&fft_msg);
 
     if (!IS_SINGLE_CORE(threadInfo.next_col_index))
       threadInfo.state = RIGHT_RECVRTOKEN;
@@ -639,6 +690,45 @@ void start_data_exchange()
       threadInfo.state = RIGHT_RECVCTOKEN;
   }
 }
+
+void start_data_exchange1()
+{
+  //use threadinfo to 
+  threadInfo.token = 0;
+  threadInfo.current_core = 0;
+  prepareFunc = data_prepare1;
+
+  threadInfo.core_state = threadInfo.origin_state;
+  init_core_state();
+  
+  if (IS_BEGIN_CORE(threadInfo.range, threadInfo.logic_id))
+  {
+    // copy data to out
+    prepareFunc(&fft_msg);
+
+    if (!IS_SINGLE_CORE(threadInfo.next_col_index))
+    {
+      LONG_PUTR(threadInfo.token, threadInfo.next_col_index);
+		  threadInfo.state = RIGHT_RECVRDATA;
+		}
+		else
+		{
+		  LONG_PUTC(threadInfo.token, threadInfo.next_row_index);
+		  threadInfo.state = RIGHT_RECVCDATA;
+		}
+  }
+  else
+  {
+    // copy data to temp
+    prepareFunc(&fft_msg);
+
+    if (!IS_SINGLE_CORE(threadInfo.next_col_index))
+      threadInfo.state = RIGHT_RECVRTOKEN;
+    else
+      threadInfo.state = RIGHT_RECVCTOKEN;
+  }
+}
+
 
 inline void end_data_exchange()
 {
@@ -777,4 +867,62 @@ void do_data_exchange()
     state = threadInfo.state;
   }
 }
+
+
+void result_inverse(FFT_TYPE* in, FFT_TYPE* out)
+{
+  int i = 0;
+  int j = 0;
+  int index;
+
+  while (i < MAX_PCORE_DATA) // TODO
+  {
+    index = (j % 25) * 80 + (j / 25) * 2;
+    out[index].re = in[i].re;
+    out[index].im = in[i].im;
+    out[index + 1].re = in[i + 1].re;
+    out[index + 1].im = in[i + 1].im;
+
+    ++j;
+    i += 2;
+  }
+  
+}
+
+void result_inverse1(FFT_TYPE* in, FFT_TYPE* out)
+{
+  int i = 0;
+  int j = 0;
+  int index;
+  
+  while (i < MAX_PCORE_DATA)
+  {
+    //index = (j % 25) * 80 + (j / 25) * 2;
+    index = (j % 5) * 400 + (j / 5) * 2;
+    out[i].re = in[index].re;
+    out[i].im = in[index].im;
+    out[i + 1].re = in[index + 1].re;
+    out[i + 1].im = in[index + 1].im;
+
+    ++j;
+    i += 2;
+  }
+}
+
+void result_inverse2(FFT_TYPE* in, FFT_TYPE* out)
+{
+  int i = 0;
+  int j = 0;
+  int index;
+  while (i < MAX_PCORE_DATA)
+  {
+    index = (j % 80) * 25 + (j / 80) * 1;
+    out[i].re = in[index].re;
+    out[i].im = in[index].im;
+
+    ++j;
+    ++i;
+  }
+}
+
 
